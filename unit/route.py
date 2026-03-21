@@ -38,7 +38,7 @@ def load_gpx_route(file_path):
         print(f"❌ 解析 GPX 文件时发生错误: {e}")
         return None
 
-def generate_interactive_map(route_points,out_html):
+def generate_html_map(route_points,out_html):
     """根据坐标点列表生成交互式 HTML 地图"""
     if not route_points or len(route_points) < 2:
         print("❌ 坐标点不足，无法绘制地图线。")
@@ -245,7 +245,7 @@ if __name__ == "__main__":
             
         print(f"  终点坐标: 纬度 {points[-1]['lat']:.6f}, 经度 {points[-1]['lon']:.6f}")
         print("-" * 30)
-    # generate_interactive_map(points, out_html)
+    # generate_html_map(points, out_html)
 
     # # 显示路径
     # display_html(out_html)
