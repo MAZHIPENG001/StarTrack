@@ -3,6 +3,7 @@ import time
 import math
 from unit.route import load_gpx_route,MapProjector
 import os
+import random
 # import gpxpy
 
 class BaseScreen:
@@ -214,16 +215,22 @@ class MapScreen(BaseScreen):
         # 存储当前的传感器数据
         self.current_lat = None
         self.current_lon = None
-        self.heading = 0
-        # self.route_points = load_gpx_route(path)
+        self.heading = None
+        self.compass_status=True
+        
+        # compass
+        self.compass_radius = 180
+        self.compass_cx = self.width - self.compass_radius - 40
+        self.compass_cy = self.height/2 #- self.compass_radius - 20
 
+        # map
         # --- 1. 扫描地图文件夹 ---
         self.map_dir = '/home/ma/StarTrack/map'
         # self.gpx_paths,route_menu_items=self.load_map(self.map_dir)
         self.load_map()
         # --- 2. 注入多级菜单 ---
         my_menus = {
-            'main': ["1. Select Route", "2. Toggle Style", "3. Zoom In (+)", "4. Zoom Out (-)"],
+            'main': ["1. Select Route", "2. Toggle Style", "3. Zoom In (+)", "4. Zoom Out (-)", f"5. Compass: {"ON" if self.compass_status else "OFF"}"],
             'route_menu': self.route_menu_items
         }
         self.init_menus(my_menus, start_level='main')
@@ -295,7 +302,10 @@ class MapScreen(BaseScreen):
 
         lat=30.259885
         lon=120.157252
-        heading =90
+        if self.compass_status is True:
+            heading = random.randint(1, 360)
+        else:
+            heading = 0
         self._set_sensor_data(lat, lon, heading)
         # pass
 
@@ -307,11 +317,13 @@ class MapScreen(BaseScreen):
         # 2. 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
         if self.current_lat is not None and self.current_lon is not None:
             px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
-            self._draw_navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
-        
+            self._navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
+
+        if self.compass_status is True:
+            self._hud_compass(surface, self.compass_cx, self.compass_cy, self.compass_radius, self.heading)
         self.draw_menu(surface, 50, 50)      
 
-    def _draw_navigation_arrow(self, surface, color, center, radius, heading):
+    def _navigation_arrow(self, surface, color, center, radius, heading):
         """画一个带有指向性的箭头"""
         angle_rad = math.radians(heading - 90)
         tip = (center[0] + radius * math.cos(angle_rad), 
@@ -321,6 +333,62 @@ class MapScreen(BaseScreen):
         right_wing = (center[0] + radius * 0.8 * math.cos(angle_rad - 2.5), 
                       center[1] + radius * 0.8 * math.sin(angle_rad - 2.5))
         pygame.draw.polygon(surface, color, [tip, left_wing, right_wing])
+
+    def _hud_compass(self, surface, cx, cy, radius, heading):
+        """
+        绘制专业级 HUD 浮动指南针
+        :param cx, cy: 指南针在屏幕上的中心坐标
+        :param radius: 指南针的半径大小
+        :param heading: 当前的绝对航向角 (0-360)
+        """
+        # 1. 绘制半透明的仪表盘底座
+        dial_bg = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        pygame.draw.circle(dial_bg, (20, 20, 20, 200), (radius, radius), radius)
+        surface.blit(dial_bg, (cx - radius, cy - radius))
+        
+        # 绘制外边框
+        pygame.draw.circle(surface, (100, 100, 100), (cx, cy), radius, 2)
+        
+        # 2. 绘制旋转的刻度和字母 (N, E, S, W)
+        font_labels = pygame.font.SysFont("Arial", int(radius * 0.3), bold=True)
+        directions = {0: ('N', (255, 50, 50)), 90: ('E', (200, 200, 200)), 
+                      180: ('S', (200, 200, 200)), 270: ('W', (200, 200, 200))}
+        
+        # 每隔 15 度画一个刻度
+        for deg in range(0, 360, 15):
+            # 核心算法：屏幕正上方是 -90 度。表盘需要根据 heading 反向旋转。
+            screen_angle = math.radians(-90 + deg - heading)
+            
+            if deg in directions:
+                # 绘制 N, E, S, W 字母
+                char, color = directions[deg]
+                text = font_labels.render(char, True, color)
+                # 将字母往圆心缩进一点
+                text_r = radius * 0.7 
+                tx = cx + text_r * math.cos(screen_angle) - text.get_width() // 2
+                ty = cy + text_r * math.sin(screen_angle) - text.get_height() // 2
+                surface.blit(text, (tx, ty))
+            else:
+                # 绘制普通刻度线
+                # 45度角（东北、东南等）画长线，其余画短线
+                inner_r = radius * 0.85 if deg % 45 == 0 else radius * 0.92
+                start_x = cx + inner_r * math.cos(screen_angle)
+                start_y = cy + inner_r * math.sin(screen_angle)
+                end_x = cx + radius * math.cos(screen_angle)
+                end_y = cy + radius * math.sin(screen_angle)
+                pygame.draw.line(surface, (150, 150, 150), (start_x, start_y), (end_x, end_y), 2)
+                
+        # 3. 绘制正上方的“当前航向”游标 (一个金黄色的倒三角)
+        pygame.draw.polygon(surface, self.PINK, [
+            (cx, cy - radius + 2),         # 顶点向下
+            (cx - 8, cy - radius - 12),    # 左上
+            (cx + 8, cy - radius - 12)     # 右上
+        ])
+        
+        # 4. 在仪表盘正中央显示数字航向
+        font_digital = pygame.font.SysFont("Arial", int(radius * 0.4))
+        digital_text = font_digital.render(f"{int(heading)}°", True, (255, 255, 255))
+        surface.blit(digital_text, (cx - digital_text.get_width() // 2, cy - digital_text.get_height() // 2))
 
     def on_confirm(self, index):
         """处理地图界面的菜单确认动作"""
@@ -334,6 +402,10 @@ class MapScreen(BaseScreen):
                 print("缩放功能待开发: +")
             elif index == 3:
                 print("缩放功能待开发: -")
+            elif index == 4:
+                print("change compass statues")
+                self.compass_status=not self.compass_status
+                self.menus['main'][4] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
 
         elif self.current_menu_level == 'route_menu':
             # 判断是不是按了返回键
