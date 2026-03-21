@@ -10,6 +10,47 @@ class BaseScreen:
         self.width = width
         self.height = height
 
+        # 黑色/白色/灰色
+        self.BLACK = (0, 0, 0)
+        self.WHITE = (255, 255, 255)
+        self.GRAY = (128, 128, 128)
+        self.LIGHT_GRAY = (200, 200, 200)
+        self.DARK_GRAY = (64, 64, 64)
+
+        # 红色系
+        self.RED = (255, 0, 0)
+        self.DARK_RED = (139, 0, 0)
+        self.LIGHT_RED = (255, 100, 100)
+
+        # 绿色系
+        self.GREEN = (0, 255, 0)
+        self.DARK_GREEN = (0, 100, 0)
+        self.LIGHT_GREEN = (144, 238, 144)
+        self.LIME = (50, 205, 50)
+
+        # 蓝色系
+        self.BLUE = (0, 0, 255)
+        self.DARK_BLUE = (0, 0, 139)
+        self.LIGHT_BLUE = (173, 216, 230)
+        self.SKY_BLUE = (135, 206, 235)
+
+        # 黄色/橙色
+        self.YELLOW = (255, 255, 0)
+        self.GOLD = (255, 215, 0)
+        self.ORANGE = (255, 165, 0)
+        self.DARK_ORANGE = (255, 140, 0)
+
+        # 紫色/粉色
+        self.PURPLE = (128, 0, 128)
+        self.VIOLET = (238, 130, 238)
+        self.PINK = (255, 192, 203)
+        self.HOT_PINK = (255, 105, 180)
+
+        # 棕色/青色
+        self.BROWN = (165, 42, 42)
+        self.CYAN = (0, 255, 255)
+        self.TEAL = (0, 128, 128)
+        self.MAGENTA = (255, 0, 255)
         self.menu_items = []      # 存放菜单文字的列表
         self.selected_index = 0   # 当前选中的菜单项索引
         self.font_menu = pygame.font.SysFont("Arial", 24, bold=True)
@@ -71,18 +112,18 @@ class BaseScreen:
 
 class DesktopScreen(BaseScreen):
     """界面 1：桌面主页"""
-    def __init__(self, width=400, height=400, bg_img="/home/ma/StarTrack/image/cloud.png"):
+    def __init__(self, width, height,):
         super().__init__(width, height)
         self.font_time = pygame.font.SysFont("Arial", 80, bold=True)
-        self.font_date = pygame.font.SysFont("Arial", 30)
-        self.bg_img = pygame.image.load(bg_img)
+        self.font_date = pygame.font.SysFont("Arial", 30)    
 
         # --- 1. 动态读取本地图片文件 ---
         self.image_dir = '/home/ma/StarTrack/image'
-        self.wallpaper_paths = []    # 存放图片的绝对路径 (后台用)
-        # wallpaper_menu_items = []    # 存放菜单上显示的文字 (前台用)
-        # self.wallpaper_paths,wallpaper_menu_items = self.load_image()
         self.load_image()
+        index=0
+        selected_path = self.wallpaper_paths[index]
+        self._load_wallpaper(selected_path)
+
         # --- 1. 定义多级菜单的字典 ---
         self.menus = {
             'main': [
@@ -93,8 +134,6 @@ class DesktopScreen(BaseScreen):
             ],
             'wallpaper_menu': self.wallpaper_menu_items
         }
-        # self.current_menu_level = 'main' # 记录当前在哪个层级
-        # self.menu_items = self.menus[self.current_menu_level]
         self.init_menus(self.menus, start_level='main')
 
     def load_image(self):
@@ -168,24 +207,15 @@ class DesktopScreen(BaseScreen):
 
 class MapScreen(BaseScreen):
     """界面 2：GPX 导航地图"""
-    def __init__(self, width=400, height=400, path='/home/ma/StarTrack/map/westlake.gpx'):
+    def __init__(self, width=400, height=400):
         super().__init__(width, height)
-        
-        # 颜色库
-        self.BLACK = (20, 20, 20)
-        self.DARK_GREEN = (0, 80, 0)
-        self.ROUTE_COLOR = (50, 150, 255)
-        self.START_COLOR = (0, 255, 0)
-        self.END_COLOR = (255, 50, 50)
-        self.MY_COLOR = (255, 200, 0) 
-
         # 显示风格
         self.map_style = 'dark'
         # 存储当前的传感器数据
         self.current_lat = None
         self.current_lon = None
         self.heading = 0
-        self.route_points = load_gpx_route(path)
+        # self.route_points = load_gpx_route(path)
 
         # --- 1. 扫描地图文件夹 ---
         self.map_dir = '/home/ma/StarTrack/map'
@@ -215,33 +245,6 @@ class MapScreen(BaseScreen):
             self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in dummy_points]
             self._draw_static_background()
     
-    # def _load_gpx_and_project(self, filepath):
-    #     """核心业务逻辑：读取 GPX -> 提取坐标 -> 重新实例化投影器 -> 重绘画布"""
-    #     try:
-    #         print(f"正在解析路线: {filepath} ...")
-    #         points = []
-    #         with open(filepath, 'r', encoding='utf-8') as f:
-    #             gpx = gpxpy.parse(f)
-    #             for track in gpx.tracks:
-    #                 for segment in track.segments:
-    #                     for point in segment.points:
-    #                         points.append({'lat': point.latitude, 'lon': point.longitude})
-            
-    #         if len(points) < 2:
-    #             print("⚠️ GPX 文件中没有足够的轨迹点！")
-    #             return
-
-    #         # 重新实例化投影器 (自动适应新路线的比例尺)
-    #         self.projector = MapProjector(points, self.width, self.height)
-    #         self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in points]
-            
-    #         # 路线变了，必须重新画底图
-    #         self._draw_static_background()
-    #         print("✅ 路线加载并投影成功！")
-            
-    #     except Exception as e:
-    #         print(f"❌ 解析 GPX 失败: {e}")
-
     def load_map(self):
         self.gpx_paths=[]
         self.route_menu_items=[]
@@ -275,9 +278,9 @@ class MapScreen(BaseScreen):
             
         # 画路线和起终点
         if self.route_pixels:
-            pygame.draw.lines(self.bg_surface, self.ROUTE_COLOR, False, self.route_pixels, 4)
-            pygame.draw.circle(self.bg_surface, self.START_COLOR, self.route_pixels[0], 6)
-            pygame.draw.circle(self.bg_surface, self.END_COLOR, self.route_pixels[-1], 6)
+            pygame.draw.lines(self.bg_surface, self.GREEN, False, self.route_pixels, 4)
+            pygame.draw.circle(self.bg_surface, self.LIGHT_GREEN, self.route_pixels[0], 6)
+            pygame.draw.circle(self.bg_surface, self.LIGHT_RED, self.route_pixels[-1], 6)
 
     def _set_sensor_data(self, lat, lon, heading):
         """外部主程序调用此方法，将最新的 GPS 和指南针数据喂给地图"""
@@ -287,7 +290,14 @@ class MapScreen(BaseScreen):
 
     def update(self):
         # 内部动画逻辑可放在这里，目前数据更新依赖外部 _set_sensor_data
-        pass
+        lat=30.258907 
+        lon=120.154046
+
+        lat=30.259885
+        lon=120.157252
+        heading =90
+        self._set_sensor_data(lat, lon, heading)
+        # pass
 
     def draw(self, surface):
         """将画面画到 OS 传来的画布上"""
@@ -297,26 +307,11 @@ class MapScreen(BaseScreen):
         # 2. 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
         if self.current_lat is not None and self.current_lon is not None:
             px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
-            self._draw_navigation_arrow(surface, self.MY_COLOR, (px, py), 15, self.heading)
+            self._draw_navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
         
-        self.draw_menu(surface, 50, 50)
-    
-    # def draw(self, surface):
-    #     surface.blit(self.bg_surface, (0, 0))
+        self.draw_menu(surface, 50, 50)      
 
-    #     # 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
-    #     if self.current_lat is not None and self.current_lon is not None and self.projector:
-    #         px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
-    #         self._draw_navigation_arrow(surface, self.MY_COLOR, (px, py), 15, self.heading)
-
-    #     # 在屏幕右上角画菜单背景框
-    #     menu_bg = pygame.Surface((220, 180))
-    #     menu_bg.set_alpha(200)
-    #     menu_bg.fill((30, 30, 30))
-    #     surface.blit(menu_bg, (self.width - 240, 20))
-        
-
-    def _draw_navigation_arrow(self, surface, color, enter, radius, heading):
+    def _draw_navigation_arrow(self, surface, color, center, radius, heading):
         """画一个带有指向性的箭头"""
         angle_rad = math.radians(heading - 90)
         tip = (center[0] + radius * math.cos(angle_rad), 
@@ -356,10 +351,16 @@ class MapScreen(BaseScreen):
                 self.change_menu_level('main')
 
 class ScreenManager:
-    def __init__(self, width, height):
+    def __init__(self):
         pygame.init()
-        self.width = width
-        self.height = height
+        # 获取显示信息
+        info = pygame.display.Info()
+        # 获取屏幕宽度和高度
+        screen_width = info.current_w
+        screen_height = info.current_h
+        print(f"屏幕分辨率: {screen_width} x {screen_height}")
+        self.width = screen_width
+        self.height = screen_height
         self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.display.set_caption("StarTrack OS")
         self.clock = pygame.time.Clock()
@@ -427,7 +428,5 @@ class ScreenManager:
         self.screen.blit(nav_text, (20, self.height - self.nav_height + 20))
 
 if __name__ == "__main__":
-    # 假设你的树莓派屏幕是 800x600
-    # app = ScreenManager(1381,776)
-    app = ScreenManager(800,500)
+    app = ScreenManager()
     app.run()
