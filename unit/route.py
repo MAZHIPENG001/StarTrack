@@ -129,16 +129,32 @@ class MapProjector:
         
         # 取长宽中较小的缩放比，保证路线能完整显示且不变形
         if lon_diff == 0 or lat_diff == 0:
-            self.scale = 1 # 防止单点除零报错
+            self.base_scale = 1 # 防止单点除零报错
         else:
-            self.scale = min(draw_w / lon_diff, draw_h / lat_diff)
+            self.base_scale = min(draw_w / lon_diff, draw_h / lat_diff)
+
+        # --- 视图控制变量 ---
+        self.zoom = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+        self.center_x = self.width / 2
+        self.center_y = self.height / 2
+    
+    def set_view(self, zoom, off_x, off_y):
+        """更新视图状态"""
+        self.zoom = zoom
+        self.offset_x = off_x
+        self.offset_y = off_y
 
     def to_pixel(self, lat, lon):
-        """将真实的经纬度转换为屏幕上的 X, Y 像素坐标"""
-        # X 轴映射 (经度)
-        x = self.margin + ((lon - self.min_lon) * self.lon_scale_factor) * self.scale
-        # Y 轴映射 (纬度，注意 Pygame 的 Y 轴是朝下的，所以要用 max_lat 减去当前 lat)
-        y = self.margin + (self.max_lat - lat) * self.scale
+        """将真实的经纬度转换为屏幕上的 X, Y 像素坐标 (带缩放和平移)"""
+        # 1. 计算最原始的绝对像素位置
+        raw_x = self.margin + ((lon - self.min_lon) * self.lon_scale_factor) * self.base_scale
+        raw_y = self.margin + (self.max_lat - lat) * self.base_scale
+        
+        # 2. 核心数学转换：以屏幕中心为原点进行缩放，然后叠加偏移量
+        x = (raw_x - self.center_x) * self.zoom + self.center_x + self.offset_x
+        y = (raw_y - self.center_y) * self.zoom + self.center_y + self.offset_y
         
         return int(x), int(y)
 

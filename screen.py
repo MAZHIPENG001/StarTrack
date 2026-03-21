@@ -4,7 +4,7 @@ import math
 from unit.route import load_gpx_route,MapProjector
 import os
 import random
-# import gpxpy
+import gpxpy
 
 class BaseScreen:
     def __init__(self, width, height):
@@ -74,12 +74,6 @@ class BaseScreen:
         """当按下 4 键确认时触发。子类必须重写这个方法来具体干活"""
         pass
     
-    def change_menu_level(self, target_level):
-        """辅助函数：用于在不同菜单层级间跳转"""
-        self.current_menu_level = target_level
-        self.menu_items = self.menus[self.current_menu_level]
-        self.selected_index = 0 # 每次切菜单，光标自动回到第一项
-
     def draw_menu(self, surface, start_x, start_y):
         """通用的绘制菜单模块，子类直接调用即可"""
         if not self.menu_items: return
@@ -110,6 +104,12 @@ class BaseScreen:
         self.menus = menus_dict
         if start_level in self.menus:
             self.change_menu_level(start_level)
+    
+    def change_menu_level(self, target_level):
+        """辅助函数：用于在不同菜单层级间跳转"""
+        self.current_menu_level = target_level
+        self.menu_items = self.menus[self.current_menu_level]
+        self.selected_index = 0 # 每次切菜单，光标自动回到第一项
 
 class DesktopScreen(BaseScreen):
     """界面 1：桌面主页"""
@@ -119,7 +119,7 @@ class DesktopScreen(BaseScreen):
         self.font_date = pygame.font.SysFont("Arial", 30)    
 
         # --- 1. 动态读取本地图片文件 ---
-        self.image_dir = '/home/ma/StarTrack/image'
+        self.image_dir = './wallpaper'
         self.load_image()
         index=0
         selected_path = self.wallpaper_paths[index]
@@ -223,29 +223,54 @@ class MapScreen(BaseScreen):
         self.compass_cx = self.width - self.compass_radius - 40
         self.compass_cy = self.height/2 #- self.compass_radius - 20
 
+        # Zoom
+        # --- 地图视图状态 ---
+        self.zoom_level = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.pan_step = 80 # 每次平移移动 80 个像素
+
         # map
+        # --- 0. 初始化地图参数 ---
+        self.projector = None
+        self.route_pixels = []
         # --- 1. 扫描地图文件夹 ---
-        self.map_dir = '/home/ma/StarTrack/map'
+        self.map_dir = './map'
         # self.gpx_paths,route_menu_items=self.load_map(self.map_dir)
         self.load_map()
         # --- 2. 注入多级菜单 ---
         my_menus = {
-            'main': ["1. Select Route", "2. Toggle Style", "3. Zoom In (+)", "4. Zoom Out (-)", f"5. Compass: {"ON" if self.compass_status else "OFF"}"],
-            'route_menu': self.route_menu_items
+            'main': [
+                "1. Select Route", 
+                "2. Toggle Style", 
+                "3. Zoom(+-)",  
+                f"4. Compass: {"ON" if self.compass_status else "OFF"}"
+                ],
+            'route_menu': self.route_menu_items,
+            'zoom':[
+                '1. Select area',
+                '2. Zoom In ++',
+                '3. Zoom Out --',
+                '<- back'
+                ],
+            'select_area':[
+                '1. up',
+                '2. down',
+                '3. left',
+                '4. right',
+                '5. back to my location',
+                '6. back to map default',
+                # '6. set all default',
+                '7. <-back'
+            ]
         }
         self.init_menus(my_menus, start_level='main')
-        # --- 3. 初始化默认地图 ---
+        # --- 3. 初始化背景 ---
         self.bg_surface = pygame.Surface((self.width, self.height))
-        self.projector = None
-        self.route_pixels = []
         
         # 如果找到了路书，默认加载第一条；否则加载一个测试用的短线防报错
         if self.gpx_paths:
-            # self._load_gpx_and_project(self.gpx_paths[0])
-            self.points = load_gpx_route(self.gpx_paths[0])
-            self.projector = MapProjector(self.points, self.width, self.height)
-            self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.points]
-            self._draw_static_background()
+            self._load_gpx_and_project(self.gpx_paths[0])
         else:
             dummy_points = [{'lat': 30.25, 'lon': 120.15}, {'lat': 30.26, 'lon': 120.16}]
             self.projector = MapProjector(dummy_points, self.width, self.height)
@@ -297,11 +322,10 @@ class MapScreen(BaseScreen):
 
     def update(self):
         # 内部动画逻辑可放在这里，目前数据更新依赖外部 _set_sensor_data
-        lat=30.258907 
-        lon=120.154046
-
         lat=30.259885
         lon=120.157252
+        # lat,lon=self.route_pixels[0]
+        lat,lon=self.current_route_points[0]['lat'], self.current_route_points[0]['lon']
         if self.compass_status is True:
             heading = random.randint(1, 360)
         else:
@@ -390,6 +414,20 @@ class MapScreen(BaseScreen):
         digital_text = font_digital.render(f"{int(heading)}°", True, (255, 255, 255))
         surface.blit(digital_text, (cx - digital_text.get_width() // 2, cy - digital_text.get_height() // 2))
 
+    def _refresh_map_view(self):
+        """当缩放或平移发生时，重新计算路线像素并重绘背景"""
+        if self.projector:
+            # 更新投影器的视图状态
+            self.projector.set_view(self.zoom_level, self.pan_x, self.pan_y)
+            
+            # 重新提取当前 GPX 路书的原始经纬度数据并进行像素转换
+            # (由于我们之前只存了像素，为了支持无损缩放，我们要把原始经纬度存下来)
+            if hasattr(self, 'current_route_points'):
+                self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.current_route_points]
+            
+            # 重新绘制静态背景
+            self._draw_static_background()
+
     def on_confirm(self, index):
         """处理地图界面的菜单确认动作"""
         if self.current_menu_level == 'main':
@@ -399,13 +437,57 @@ class MapScreen(BaseScreen):
                 self.map_style = 'light' if self.map_style == 'dark' else 'dark'
                 self._draw_static_background()
             elif index == 2:
-                print("缩放功能待开发: +")
+                print("缩放功能")
+                self.change_menu_level('zoom') # 跳入地图缩放菜单
             elif index == 3:
-                print("缩放功能待开发: -")
-            elif index == 4:
                 print("change compass statues")
                 self.compass_status=not self.compass_status
-                self.menus['main'][4] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
+                self.menus['main'][len(self.menus['main'])-1] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
+
+        elif self.current_menu_level == 'zoom':
+            if index == 0: self.change_menu_level('select_area') # 跳入平移菜单
+            elif index == 1: 
+                self.zoom_level *= 1.3  # 放大 1.3 倍
+                self._refresh_map_view()
+            elif index == 2: 
+                self.zoom_level /= 1.3  # 缩小
+                self._refresh_map_view()
+            elif index == 3: self.change_menu_level('main')
+
+        elif self.current_menu_level == 'select_area':
+            # 注意：如果想让地图往下走，代表视野往上走，所以 offset 是正数
+            if index == 0:   # Up (视野向上，地图向下)
+                self.pan_y += self.pan_step
+                self._refresh_map_view()
+            elif index == 1: # Down
+                self.pan_y -= self.pan_step
+                self._refresh_map_view()
+            elif index == 2: # Left
+                self.pan_x += self.pan_step
+                self._refresh_map_view()
+            elif index == 3: # Right
+                self.pan_x -= self.pan_step
+                self._refresh_map_view()
+            elif index == 4: # Back to my location (极致数学之美)
+                if self.current_lat is not None and self.current_lon is not None and self.projector:
+                    # 获取当前所在地的未缩放基准坐标
+                    raw_x = self.projector.margin + ((self.current_lon - self.projector.min_lon) * self.projector.lon_scale_factor) * self.projector.base_scale
+                    raw_y = self.projector.margin + (self.projector.max_lat - self.current_lat) * self.projector.base_scale
+                    
+                    # 逆向推算偏移量，确保当前位置的最终 X, Y 等于屏幕中心点
+                    self.pan_x = -(raw_x - self.projector.center_x) * self.zoom_level
+                    self.pan_y = -(raw_y - self.projector.center_y) * self.zoom_level
+                    self._refresh_map_view()
+                    print("已重新居中到当前 GPS 定位！")
+                else:
+                    print("⚠️ 尚未获取到有效的 GPS 坐标，无法居中。")
+            elif index == 5:
+                self.pan_x = 0
+                self.pan_y = 0
+                self.zoom_level = 1
+                self._refresh_map_view()
+            elif index == 6: 
+                self.change_menu_level('zoom')
 
         elif self.current_menu_level == 'route_menu':
             # 判断是不是按了返回键
@@ -414,13 +496,47 @@ class MapScreen(BaseScreen):
             else:
                 # 加载选中的路书
                 selected_gpx = self.gpx_paths[index]
-                # self._load_gpx_and_project(selected_gpx)
-                self.points = load_gpx_route(selected_gpx)
-                self.projector = MapProjector(self.points, self.width, self.height)
-                self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.points]
-                self._draw_static_background()
+                self._load_gpx_and_project(selected_gpx)
                 # 加载完成后，自动退回主菜单，保持界面清爽
                 self.change_menu_level('main')
+
+    def _load_gpx_and_project(self, filepath):
+        """核心业务逻辑：读取 GPX -> 提取坐标 -> 重新实例化投影器 -> 重绘画布"""
+        try:
+            print(f"正在解析路线: {filepath} ...")
+            points = []
+            with open(filepath, 'r', encoding='utf-8') as f:
+                gpx = gpxpy.parse(f)
+                for track in gpx.tracks:
+                    for segment in track.segments:
+                        for point in segment.points:
+                            points.append({'lat': point.latitude, 'lon': point.longitude})
+            
+            if len(points) < 2:
+                print("⚠️ GPX 文件中没有足够的轨迹点！")
+                return
+
+            # ==================================================
+            # ⭐️ 把原始的、绝对精确的经纬度列表存入对象的属性中，永久保存！
+            # 格式类似于：[{'lat': 30.25, 'lon': 120.15}, {'lat': 30.26, 'lon': 120.16} ...]
+            self.current_route_points = points  
+            # ==================================================
+
+            # 重置视图状态（每次加载新路书，默认居中且不缩放）
+            self.zoom_level = 1.0
+            self.pan_x = 0
+            self.pan_y = 0
+
+            # 重新实例化投影器 (自动适应新路线的比例尺)
+            self.projector = MapProjector(points, self.width, self.height)
+            self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in points]
+            
+            # 路线变了，必须重新画底图
+            self._draw_static_background()
+            print("✅ 路线加载并投影成功！")
+            
+        except Exception as e:
+            print(f"❌ 解析 GPX 失败: {e}")
 
 class ScreenManager:
     def __init__(self):
@@ -454,19 +570,16 @@ class ScreenManager:
         running = True
         while running:
             current_screen = self.screens[self.current_screen_name]
-
             # 1. 处理事件
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                
                 if event.type == pygame.KEYDOWN:
                     # 【系统级拦截】：按键 1 (轮回切换界面)
                     if event.key == pygame.K_1:
                         self.current_index = (self.current_index + 1) % len(self.screen_order)
                         self.current_screen_name = self.screen_order[self.current_index]
                         print(f"切换至页面: {self.current_screen_name.upper()}")
-                        
                     # 【放行】：如果按的不是 1，统统扔给当前界面的 handle_event 去处理
                     else:
                         current_screen.handle_event(event)
