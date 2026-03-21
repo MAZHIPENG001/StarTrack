@@ -3,6 +3,7 @@ import time
 import math
 from unit.route import load_gpx_route,MapProjector
 import os
+# import gpxpy
 
 class BaseScreen:
     def __init__(self, width, height):
@@ -45,7 +46,7 @@ class BaseScreen:
             # 被选中的高亮成醒目的黄色，且前面加个箭头
             if i == self.selected_index:
                 color = (255, 200, 0)
-                prefix = "▶  " 
+                prefix = "->  " 
             else:
                 color = (150, 150, 150)
                 prefix = "    "
@@ -60,6 +61,13 @@ class BaseScreen:
     def draw(self, surface):
         pass
 
+    def init_menus(self, menus_dict, start_level='main'):
+        """
+        子类在初始化时调用此方法，一次性注入所有菜单数据。
+        """
+        self.menus = menus_dict
+        if start_level in self.menus:
+            self.change_menu_level(start_level)
 
 class DesktopScreen(BaseScreen):
     """界面 1：桌面主页"""
@@ -72,8 +80,26 @@ class DesktopScreen(BaseScreen):
         # --- 1. 动态读取本地图片文件 ---
         self.image_dir = '/home/ma/StarTrack/image'
         self.wallpaper_paths = []    # 存放图片的绝对路径 (后台用)
-        wallpaper_menu_items = []    # 存放菜单上显示的文字 (前台用)
-        
+        # wallpaper_menu_items = []    # 存放菜单上显示的文字 (前台用)
+        # self.wallpaper_paths,wallpaper_menu_items = self.load_image()
+        self.load_image()
+        # --- 1. 定义多级菜单的字典 ---
+        self.menus = {
+            'main': [
+                "1. System Info", 
+                "2. Sleep Display", 
+                "3. Power Off OS", 
+                "4. Change Wallpaper"
+            ],
+            'wallpaper_menu': self.wallpaper_menu_items
+        }
+        # self.current_menu_level = 'main' # 记录当前在哪个层级
+        # self.menu_items = self.menus[self.current_menu_level]
+        self.init_menus(self.menus, start_level='main')
+
+    def load_image(self):
+        self.wallpaper_paths = []  # 初始化为实例变量
+        self.wallpaper_menu_items = []  # 初始化为实例变量
         # 扫描壁纸目录 (如果目录存在的话)
         if os.path.exists(self.image_dir):
             # 遍历文件夹中的文件，并按字母排序
@@ -84,31 +110,15 @@ class DesktopScreen(BaseScreen):
                     self.wallpaper_paths.append(os.path.join(self.image_dir, file_name))
                     # 在菜单显示时，加上箭头，并截断过长的文件名防止越界
                     display_name = file_name[:20] + "..." if len(file_name) > 20 else file_name
-                    wallpaper_menu_items.append(f"  -> {display_name}")
+                    self.wallpaper_menu_items.append(f"  -> {display_name}")
         else:
             print(f"⚠️ 警告: 找不到壁纸文件夹 {self.image_dir}")
-            wallpaper_menu_items.append("  (No Images Found)")
+            self.wallpaper_menu_items.append("  (No Images Found)")
         # 无论有没有图片，最后都必须加上返回键！
-        wallpaper_menu_items.append("  <- Back")
-        # 菜单
-        self.menu_items = ["1.System Info", "2.Sleep Display", "3.Power Off OS", "4.Change the wallpaper"]
-        # --- 1. 定义多级菜单的字典 ---
-        self.menus = {
-            'main': [
-                "1. System Info", 
-                "2. Sleep Display", 
-                "3. Power Off OS", 
-                "4. Change Wallpaper"
-            ],
-            'wallpaper_menu': wallpaper_menu_items
-        }
-        self.current_menu_level = 'main' # 记录当前在哪个层级
-        self.menu_items = self.menus[self.current_menu_level]
+        self.wallpaper_menu_items.append("  <- Back")
 
     def draw(self, surface):
-        # surface.fill((20, 30, 40)) # 深蓝灰背景
         surface.blit(self.bg_img, (0,0))
-        # 如果有图片: surface.blit(self.bg_img, (0,0))
         
         # 绘制时间
         current_time = time.strftime("%H:%M:%S")
@@ -119,7 +129,7 @@ class DesktopScreen(BaseScreen):
         
         surface.blit(time_text, (self.width//2 - time_text.get_width()//2, self.height//3))
         surface.blit(date_text, (self.width//2 - date_text.get_width()//2, self.height//3 + 100))
-        self.draw_menu(surface, 50, 150)
+        self.draw_menu(surface, 50, 50)
 
     def on_confirm(self, index):
         # 2. 根据选中的是第几个，执行对应的操作
@@ -168,36 +178,106 @@ class MapScreen(BaseScreen):
         self.START_COLOR = (0, 255, 0)
         self.END_COLOR = (255, 50, 50)
         self.MY_COLOR = (255, 200, 0) 
-        
+
+        # 显示风格
+        self.map_style = 'dark'
         # 存储当前的传感器数据
         self.current_lat = None
         self.current_lon = None
         self.heading = 0
         self.route_points = load_gpx_route(path)
-        # 如果没有传入路线数据，生成一条模拟线防止程序崩溃
-        if not self.route_points:
-            print("警告：没有路线数据，使用测试路线。")
-            self.route_points = [{'lat': 30.25, 'lon': 120.15}, {'lat': 30.26, 'lon': 120.16}]
 
-        # 初始化投影器并缓存路线像素点
-        self.projector = MapProjector(self.route_points, width, height)
-        self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.route_points]
-        
-        # 预先绘制静态背景 Surface，极大提升帧率
+        # --- 1. 扫描地图文件夹 ---
+        self.map_dir = '/home/ma/StarTrack/map'
+        # self.gpx_paths,route_menu_items=self.load_map(self.map_dir)
+        self.load_map()
+        # --- 2. 注入多级菜单 ---
+        my_menus = {
+            'main': ["1. Select Route", "2. Toggle Style", "3. Zoom In (+)", "4. Zoom Out (-)"],
+            'route_menu': self.route_menu_items
+        }
+        self.init_menus(my_menus, start_level='main')
+        # --- 3. 初始化默认地图 ---
         self.bg_surface = pygame.Surface((self.width, self.height))
-        self._draw_static_background()
+        self.projector = None
+        self.route_pixels = []
+        
+        # 如果找到了路书，默认加载第一条；否则加载一个测试用的短线防报错
+        if self.gpx_paths:
+            # self._load_gpx_and_project(self.gpx_paths[0])
+            self.points = load_gpx_route(self.gpx_paths[0])
+            self.projector = MapProjector(self.points, self.width, self.height)
+            self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.points]
+            self._draw_static_background()
+        else:
+            dummy_points = [{'lat': 30.25, 'lon': 120.15}, {'lat': 30.26, 'lon': 120.16}]
+            self.projector = MapProjector(dummy_points, self.width, self.height)
+            self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in dummy_points]
+            self._draw_static_background()
+    
+    # def _load_gpx_and_project(self, filepath):
+    #     """核心业务逻辑：读取 GPX -> 提取坐标 -> 重新实例化投影器 -> 重绘画布"""
+    #     try:
+    #         print(f"正在解析路线: {filepath} ...")
+    #         points = []
+    #         with open(filepath, 'r', encoding='utf-8') as f:
+    #             gpx = gpxpy.parse(f)
+    #             for track in gpx.tracks:
+    #                 for segment in track.segments:
+    #                     for point in segment.points:
+    #                         points.append({'lat': point.latitude, 'lon': point.longitude})
+            
+    #         if len(points) < 2:
+    #             print("⚠️ GPX 文件中没有足够的轨迹点！")
+    #             return
+
+    #         # 重新实例化投影器 (自动适应新路线的比例尺)
+    #         self.projector = MapProjector(points, self.width, self.height)
+    #         self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in points]
+            
+    #         # 路线变了，必须重新画底图
+    #         self._draw_static_background()
+    #         print("✅ 路线加载并投影成功！")
+            
+    #     except Exception as e:
+    #         print(f"❌ 解析 GPX 失败: {e}")
+
+    def load_map(self):
+        self.gpx_paths=[]
+        self.route_menu_items=[]
+        if os.path.exists(self.map_dir):
+            for file_name in sorted(os.listdir(self.map_dir)):
+                if file_name.lower().endswith('.gpx'):
+                    self.gpx_paths.append(os.path.join(self.map_dir, file_name))
+                    # 截断过长的文件名并在前面加箭头
+                    display_name = file_name[:18] + ".." if len(file_name) > 18 else file_name
+                    self.route_menu_items.append(f"  -> {display_name}")
+        else:
+            print(f"⚠️ 找不到地图文件夹: {self.map_dir}")
+            self.route_menu_items.append("  (No GPX Found)")
+
+        self.route_menu_items.append("  <- Back") # 添加虚拟返回键
 
     def _draw_static_background(self):
-        """绘制不会改变的背景和路线"""
-        self.bg_surface.fill(self.BLACK)
+        """根据当前的 map_style 绘制不同的背景"""
+        if self.map_style == 'dark':
+            bg_color, grid_color = (20, 20, 20), (0, 80, 0)
+        else:
+            bg_color, grid_color = (240, 235, 220), (200, 195, 180)
+
+        self.bg_surface.fill(bg_color)
+        
+        # 画网格
         for i in range(0, self.width, 50):
-            pygame.draw.line(self.bg_surface, self.DARK_GREEN, (i, 0), (i, self.height), 1)
+            pygame.draw.line(self.bg_surface, grid_color, (i, 0), (i, self.height), 1)
         for i in range(0, self.height, 50):
-            pygame.draw.line(self.bg_surface, self.DARK_GREEN, (0, i), (self.width, i), 1)
+            pygame.draw.line(self.bg_surface, grid_color, (0, i), (self.width, i), 1)
             
-        pygame.draw.lines(self.bg_surface, self.ROUTE_COLOR, False, self.route_pixels, 4)
-        pygame.draw.circle(self.bg_surface, self.START_COLOR, self.route_pixels[0], 6)
-        pygame.draw.circle(self.bg_surface, self.END_COLOR, self.route_pixels[-1], 6)
+        # 画路线和起终点
+        if self.route_pixels:
+            pygame.draw.lines(self.bg_surface, self.ROUTE_COLOR, False, self.route_pixels, 4)
+            pygame.draw.circle(self.bg_surface, self.START_COLOR, self.route_pixels[0], 6)
+            pygame.draw.circle(self.bg_surface, self.END_COLOR, self.route_pixels[-1], 6)
 
     def _set_sensor_data(self, lat, lon, heading):
         """外部主程序调用此方法，将最新的 GPS 和指南针数据喂给地图"""
@@ -218,8 +298,25 @@ class MapScreen(BaseScreen):
         if self.current_lat is not None and self.current_lon is not None:
             px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
             self._draw_navigation_arrow(surface, self.MY_COLOR, (px, py), 15, self.heading)
+        
+        self.draw_menu(surface, 50, 50)
+    
+    # def draw(self, surface):
+    #     surface.blit(self.bg_surface, (0, 0))
 
-    def _draw_navigation_arrow(self, surface, color, center, radius, heading):
+    #     # 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
+    #     if self.current_lat is not None and self.current_lon is not None and self.projector:
+    #         px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
+    #         self._draw_navigation_arrow(surface, self.MY_COLOR, (px, py), 15, self.heading)
+
+    #     # 在屏幕右上角画菜单背景框
+    #     menu_bg = pygame.Surface((220, 180))
+    #     menu_bg.set_alpha(200)
+    #     menu_bg.fill((30, 30, 30))
+    #     surface.blit(menu_bg, (self.width - 240, 20))
+        
+
+    def _draw_navigation_arrow(self, surface, color, enter, radius, heading):
         """画一个带有指向性的箭头"""
         angle_rad = math.radians(heading - 90)
         tip = (center[0] + radius * math.cos(angle_rad), 
@@ -230,6 +327,33 @@ class MapScreen(BaseScreen):
                       center[1] + radius * 0.8 * math.sin(angle_rad - 2.5))
         pygame.draw.polygon(surface, color, [tip, left_wing, right_wing])
 
+    def on_confirm(self, index):
+        """处理地图界面的菜单确认动作"""
+        if self.current_menu_level == 'main':
+            if index == 0:
+                self.change_menu_level('route_menu') # 跳入选择路线子菜单
+            elif index == 1:
+                self.map_style = 'light' if self.map_style == 'dark' else 'dark'
+                self._draw_static_background()
+            elif index == 2:
+                print("缩放功能待开发: +")
+            elif index == 3:
+                print("缩放功能待开发: -")
+
+        elif self.current_menu_level == 'route_menu':
+            # 判断是不是按了返回键
+            if index == len(self.gpx_paths) or not self.gpx_paths:
+                self.change_menu_level('main')
+            else:
+                # 加载选中的路书
+                selected_gpx = self.gpx_paths[index]
+                # self._load_gpx_and_project(selected_gpx)
+                self.points = load_gpx_route(selected_gpx)
+                self.projector = MapProjector(self.points, self.width, self.height)
+                self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in self.points]
+                self._draw_static_background()
+                # 加载完成后，自动退回主菜单，保持界面清爽
+                self.change_menu_level('main')
 
 class ScreenManager:
     def __init__(self, width, height):
@@ -304,5 +428,6 @@ class ScreenManager:
 
 if __name__ == "__main__":
     # 假设你的树莓派屏幕是 800x600
-    app = ScreenManager(1381,776)
+    # app = ScreenManager(1381,776)
+    app = ScreenManager(800,500)
     app.run()
