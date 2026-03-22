@@ -1,6 +1,9 @@
 import math
 from lsm303d import LSM303D
-
+import sys
+sys.path.append('/home/ma/StarTrack')
+from cfg.config_manager import global_config as cfg
+import time
 class Compass:
     def __init__(self, i2c_address=0x1E, filter_size=5):
         """
@@ -18,10 +21,17 @@ class Compass:
         self.history_y = []
         self.filter_size = filter_size
 
+        self.offset_x = cfg.get('mag_offset_x', 0.0)
+        self.offset_y = cfg.get('mag_offset_y', 0.0)
+
     def _get_smoothed_mag(self):
         """获取经过平滑处理的磁力计 X 和 Y 数据 (内部方法)"""
         mag_x, mag_y, mag_z = self.lsm.magnetometer()
         
+        # ⭐️ 核心：在进行任何滤波和计算之前，先把圆心拉回原点！
+        mag_x = mag_x - self.offset_x
+        mag_y = mag_y - self.offset_y
+
         self.history_x.append(mag_x)
         self.history_y.append(mag_y)
         
@@ -71,6 +81,68 @@ class Compass:
         heading = self.get_heading()
         direction = self.get_direction_string(heading)
         return heading, direction
+    
+    # ==========================================
+    # ⭐️ 内置全自动校准方法
+    # ==========================================
+    def calibrate(self, duration=30):
+        """
+        执行磁力计硬铁校准（画8字），并自动应用和保存。
+        :param duration: 校准采样的持续时间（秒）
+        """
+        print("\n=======================================")
+        print("🧭 磁力计硬铁校准程序启动！")
+        print("=======================================")
+        print("倒计时 3 秒后开始记录数据...")
+        time.sleep(3)
+        print("\n👉 现在！请拿着你的整个设备，")
+        print("在空中缓慢地画巨大的 '8' 字形，并且不断翻转它的各种姿态。")
+        print(f"校准将持续 {duration} 秒...\n")
+
+        # 初始化极值
+        min_x = min_y = float('inf')
+        max_x = max_y = float('-inf')
+
+        start_time = time.time()
+        
+        while time.time() - start_time < duration:
+            # 注意：校准时必须读取最底层的原始数据，不能用 _get_smoothed_mag()
+            mag_x, mag_y, mag_z = self.lsm.magnetometer()
+            
+            # 记录这段时间内的最大和最小值
+            min_x = min(min_x, mag_x)
+            max_x = max(max_x, mag_x)
+            min_y = min(min_y, mag_y)
+            max_y = max(max_y, mag_y)
+            
+            # 打印简单的进度条 (终端显示用)
+            elapsed = int(time.time() - start_time)
+            print(f"\r采集进度: [{'#' * elapsed}{'.' * (duration - elapsed)}] {elapsed}/{duration}s", end="")
+            time.sleep(0.05)
+
+        # 1. 计算出真正的圆心偏移量
+        new_offset_x = (max_x + min_x) / 2
+        new_offset_y = (max_y + min_y) / 2
+
+        print("\n\n✅ 校准完成！")
+        print(f"测得新偏移量 -> X: {new_offset_x:.2f}, Y: {new_offset_y:.2f}")
+
+        # 2. 立即更新当前内存中的偏移量，让设备立刻变准
+        self.offset_x = new_offset_x
+        self.offset_y = new_offset_y
+
+        # 3. 极其关键：清空滤波器的历史数据！
+        # 因为里面的老数据带有旧的误差，不清空会导致指针突然漂移
+        self.history_x.clear()
+        self.history_y.clear()
+
+        # 4. 召唤管家，把新数据永久写进 JSON 文件
+        try:
+            cfg.set('mag_offset_x', round(new_offset_x, 2))
+            cfg.set('mag_offset_y', round(new_offset_y, 2))
+            print("🎉 校准数据已自动保存至系统配置 sys_config.json！")
+        except Exception as e:
+            print(f"❌ 保存配置失败: {e}")
 
 def main():
     # 1. 实例化指南针对象

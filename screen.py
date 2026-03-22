@@ -7,8 +7,9 @@ import random
 import gpxpy
 from unit.compass import Compass
 from unit.gps import GPSModule
-
+import json
 import math
+from cfg.config_manager import global_config as cfg
 
 # ---------------------------------------------------------
 # 地理数学工具箱
@@ -154,8 +155,9 @@ class DesktopScreen(BaseScreen):
         self.image_dir = './wallpaper'
         self.load_image()
         index=0
-        selected_path = self.wallpaper_paths[index]
-        self._load_wallpaper(selected_path)
+        self.selected_path = self.wallpaper_paths[index]
+        # self.selected_path=None
+        self._load_wallpaper(self.selected_path)
 
         # --- 1. 定义多级菜单的字典 ---
         self.menus = {
@@ -223,8 +225,8 @@ class DesktopScreen(BaseScreen):
                 self.change_menu_level('main') # 返回主菜单
             else:
                 # 用户选择了一张图片
-                selected_path = self.wallpaper_paths[index]
-                self._load_wallpaper(selected_path)
+                self.selected_path = self.wallpaper_paths[index]
+                self._load_wallpaper(self.selected_path)
 
     def _load_wallpaper(self, path):
         """内部方法：加载并缩放图片"""
@@ -276,7 +278,8 @@ class MapScreen(BaseScreen):
                 "1. Select Route", 
                 "2. Toggle Style", 
                 "3. Zoom(+-)",  
-                f"4. Compass: {"ON" if self.compass_status else "OFF"}"
+                f"4. Compass: {"ON" if self.compass_status else "OFF"}",
+                '5. Compass calibrate'
                 ],
             'route_menu': self.route_menu_items,
             'zoom':[
@@ -372,6 +375,7 @@ class MapScreen(BaseScreen):
         self._hud_gps(surface)
         self.draw_menu(surface, 50, 50)
         self._hud_pointer(surface)
+    
     def _hud_pointer(self,surface):
         # ==========================================
         # ⭐️ 新增：绘制偏航导航箭头 (Off-Course Pointer)
@@ -556,6 +560,17 @@ class MapScreen(BaseScreen):
                 print("change compass statues")
                 self.compass_status=not self.compass_status
                 self.menus['main'][len(self.menus['main'])-1] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
+            elif index == 4: # 5. Compass calibrate
+                if hasattr(self, 'calibrate_callback') and self.calibrate_callback:
+                    print("\n⚠️ 即将冻结屏幕进行校准，请看终端提示！")
+                    # 可以在这加个变量，在屏幕上画个“校准中”的提示
+                    
+                    # 真正执行硬件校准 (这会让屏幕暂停刷新 30 秒)
+                    self.calibrate_callback(duration=30) 
+                    
+                    print("✅ 校准完毕，系统恢复运行！")
+                else:
+                    print("❌ 未检测到真实的指南针硬件，无法校准！")
 
         elif self.current_menu_level == 'zoom':
             if index == 0: self.change_menu_level('select_area') # 跳入平移菜单
@@ -720,12 +735,17 @@ class ScreenManager:
                 
         # 底部导航栏高度
         self.nav_height = 60
+        
+        # 壁纸
+        default_wallpaper = './wallpaper/Cherry.png'
+        self.current_wallpaper_path = cfg.get('wallpaper_path', default_wallpaper)
+        if 'desktop' in self.screens:
+                self.screens['desktop'].selected_path = self.current_wallpaper_path
 
     def run(self):
         running = True
         # 实例化你自己的硬件类！
         # GPS
-        
         print("正在初始化 ATGM336H GPS 硬件...")
         try:
             self.gps = GPSModule(port='/dev/ttyS0', baudrate=9600)
@@ -741,6 +761,12 @@ class ScreenManager:
         try:
             self.compass = Compass(i2c_address=0x1E, filter_size=5)
             self.has_compass = True
+            # ==========================================
+            # ⭐️ 核心桥接：把校准函数的遥控器递给地图界面！
+            # 假设你的地图界面在 self.screens 里的名字叫 'map'
+            # ==========================================
+            if 'map' in self.screens:
+                self.screens['map'].calibrate_callback = self.compass.calibrate
         except Exception as e:
             print(f"指南针加载失败，将使用模拟数据。原因: {e}")
             self.has_compass = False
