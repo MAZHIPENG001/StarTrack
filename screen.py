@@ -5,6 +5,31 @@ from unit.route import load_gpx_route,MapProjector
 import os
 import random
 import gpxpy
+from unit.compass import Compass
+from unit.gps import GPSModule
+
+import math
+
+# ---------------------------------------------------------
+# 地理数学工具箱
+# ---------------------------------------------------------
+def calc_distance(lat1, lon1, lat2, lon2):
+    """使用 Haversine 公式计算地球上两点间的距离（单位：米）"""
+    R = 6371000  # 地球半径
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def calc_bearing(lat1, lon1, lat2, lon2):
+    """计算从点 1 指向点 2 的绝对方位角（0-360度，0代表正北）"""
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlon = lon2 - lon1
+    x = math.sin(dlon) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
+    initial_bearing = math.atan2(x, y)
+    return (math.degrees(initial_bearing) + 360) % 360
 
 class BaseScreen:
     def __init__(self, width, height):
@@ -110,6 +135,13 @@ class BaseScreen:
         self.current_menu_level = target_level
         self.menu_items = self.menus[self.current_menu_level]
         self.selected_index = 0 # 每次切菜单，光标自动回到第一项
+
+    def feed_data(self, **sensor_data):
+        """
+        核心升级：统一的数据接收接口！
+        主程序把所有硬件数据像自助餐一样摆在这里，子类界面按需拿取。
+        """
+        pass
 
 class DesktopScreen(BaseScreen):
     """界面 1：桌面主页"""
@@ -314,25 +346,17 @@ class MapScreen(BaseScreen):
             pygame.draw.circle(self.bg_surface, self.LIGHT_GREEN, self.route_pixels[0], 6)
             pygame.draw.circle(self.bg_surface, self.LIGHT_RED, self.route_pixels[-1], 6)
 
-    def _set_sensor_data(self, lat, lon, heading):
-        """外部主程序调用此方法，将最新的 GPS 和指南针数据喂给地图"""
-        self.current_lat = lat
-        self.current_lon = lon
-        self.heading = heading
-
-    def update(self):
-        # 内部动画逻辑可放在这里，目前数据更新依赖外部 _set_sensor_data
-        lat=30.259885
-        lon=120.157252
-        # lat,lon=self.route_pixels[0]
-        lat,lon=self.current_route_points[0]['lat'], self.current_route_points[0]['lon']
-        if self.compass_status is True:
-            heading = random.randint(1, 360)
-        else:
-            heading = 0
-        self._set_sensor_data(lat, lon, heading)
-        # pass
-
+    def feed_data(self, **sensor_data):
+        # 使用 .get() 方法，如果主程序没传这个数据，就默认返回 None 或 0，不会报错
+        self.current_lat = sensor_data.get('lat')
+        self.current_lon = sensor_data.get('lon')
+        self.heading = sensor_data.get('heading', 0)
+        
+        # 新增接收 GPS 状态数据
+        self.alt = sensor_data.get('alt', 0)
+        self.sats = sensor_data.get('sats', 0)
+        self.gps_status = sensor_data.get('gps_status', 'Unknown')
+    
     def draw(self, surface):
         """将画面画到 OS 传来的画布上"""
         # 1. 贴上静态路线图
@@ -345,7 +369,96 @@ class MapScreen(BaseScreen):
 
         if self.compass_status is True:
             self._hud_compass(surface, self.compass_cx, self.compass_cy, self.compass_radius, self.heading)
-        self.draw_menu(surface, 50, 50)      
+        self._hud_gps(surface)
+        self.draw_menu(surface, 50, 50)
+        self._hud_pointer(surface)
+    def _hud_pointer(self,surface):
+        # ==========================================
+        # ⭐️ 新增：绘制偏航导航箭头 (Off-Course Pointer)
+        # ==========================================
+        dist_to_track, pointer_angle = self._calculate_navigation()
+        
+        if dist_to_track is not None and pointer_angle is not None:
+            # 只有当偏离路线超过 10 米时，才显示警告箭头，否则说明走得很好
+            if dist_to_track > 10:
+                # 设定箭头在屏幕上的中心位置 (屏幕顶部居中)
+                arrow_center_x = self.width // 2
+                arrow_center_y = self.height // 2
+                
+                # 定义一个基础箭头形状的多边形坐标 (指向上方)
+                # 形状类似于战斗机: 尖头, 左翼, 尾凹, 右翼
+                base_arrow = [(0, -30), (-20, 20), (0, 10), (20, 20)]
+                
+                rotated_arrow = []
+                # 注意：Pygame 的旋转是逆时针的，所以我们要取负数
+                rad = math.radians(-pointer_angle) 
+                cos_a = math.cos(rad)
+                sin_a = math.sin(rad)
+                
+                for x, y in base_arrow:
+                    # 矩阵旋转公式
+                    rx = x * cos_a - y * sin_a
+                    ry = x * sin_a + y * cos_a
+                    rotated_arrow.append((arrow_center_x + rx, arrow_center_y + ry))
+                
+                # 画一个发光的红色外边框
+                pygame.draw.polygon(surface, (255, 50, 50), rotated_arrow, 4)
+                # 画一个深红色的内部填充
+                pygame.draw.polygon(surface, (150, 0, 0), rotated_arrow, 0)
+                
+                # 在箭头下方显示距离偏航多远
+                font_warn = pygame.font.SysFont("Arial", 18, bold=True)
+                txt_dist = font_warn.render(f"OFF COURSE: {int(dist_to_track)}m", True, (255, 100, 100))
+                dist_rect = txt_dist.get_rect(center=(arrow_center_x, arrow_center_y + 45))
+                surface.blit(txt_dist, dist_rect)
+    
+    def _hud_gps(self,surface):
+        # ==========================================
+        # ⭐️ 绘制左上角的 GPS 状态监控面板
+        # ==========================================
+        panel_width = 180
+        panel_height = 80
+        
+        # 📍 在这里修改基础坐标，整个面板就会跟着走！
+        # ------------------------------------------------
+        # 方案 A：左上角 (默认)
+        # base_x = 10
+        # base_y = 10
+        
+        # 方案 B：左下角 (比如你想把它挪到最下面)
+        # base_x = 10
+        # base_y = self.height - panel_height - 10
+        
+        # 方案 C：顶部居中 
+        base_x = (self.width - panel_width) // 2
+        base_y = 10
+        # ------------------------------------------------
+
+        # 1. 绘制半透明底框 (使用基础坐标)
+        hud_bg = pygame.Surface((panel_width, panel_height))
+        hud_bg.set_alpha(180)
+        hud_bg.fill(self.TEAL)
+        surface.blit(hud_bg, (base_x, base_y))
+        
+        # 2. 准备字体
+        font_small = pygame.font.SysFont("Arial", 16)
+        font_bold = pygame.font.SysFont("Arial", 16, bold=True)
+        
+        # 3. 状态颜色逻辑
+        if self.gps_status == "3D Fix":
+            status_color = (0, 255, 0) # 绿色
+        else:
+            status_color = (255, 200, 0) # 黄色
+            
+        # 4. 渲染文字
+        txt_status = font_bold.render(f"SYS: {self.gps_status}", True, status_color)
+        txt_sats = font_small.render(f"SATS: {self.sats} Locked", True, (200, 200, 200))
+        txt_alt = font_small.render(f"ALT: {self.alt} m", True, (200, 200, 200))
+        
+        # 5. 核心：文字的坐标相对于 base_x 和 base_y 进行偏移
+        surface.blit(txt_status, (base_x + 10, base_y + 5))
+        surface.blit(txt_sats,   (base_x + 10, base_y + 30))
+        surface.blit(txt_alt,    (base_x + 10, base_y + 50))
 
     def _navigation_arrow(self, surface, color, center, radius, heading):
         """画一个带有指向性的箭头"""
@@ -538,6 +651,48 @@ class MapScreen(BaseScreen):
         except Exception as e:
             print(f"❌ 解析 GPX 失败: {e}")
 
+    def _calculate_navigation(self):
+        """核心导航算法：计算偏航距离和指向目标的角度"""
+        # 如果没有路线、没有定位、或者没有指南针，就无法导航
+        if not hasattr(self, 'current_route_points') or not self.current_route_points:
+            return None, None
+        if self.current_lat is None or self.current_lon is None or self.heading is None:
+            return None, None
+
+        min_dist = float('inf')
+        closest_index = 0
+        
+        # 1. 遍历轨迹，找到离我当前位置最近的那个点
+        # (注：如果路线很长，这里可以优化为只搜索上次位置附近，目前先暴力全搜)
+        for i, point in enumerate(self.current_route_points):
+            dist = calc_distance(self.current_lat, self.current_lon, point['lat'], point['lon'])
+            if dist < min_dist:
+                min_dist = dist
+                closest_index = i
+
+        # 2. 设定“目标点” (Lookahead Point)
+        # 我们不能直接指着最近的点，否则一旦踩在线上箭头就会乱转。
+        # 我们要指向前方大概 5 个点的位置 (相当于看向远处的路标)
+        lookahead_offset = 5
+        target_index = min(closest_index + lookahead_offset, len(self.current_route_points) - 1)
+        target_point = self.current_route_points[target_index]
+
+        # 3. 计算“目标绝对方位角”
+        target_bearing = calc_bearing(
+            self.current_lat, self.current_lon, 
+            target_point['lat'], target_point['lon']
+        )
+
+        # 4. 计算“相对指针角度” (屏幕上的箭头该怎么转)
+        # 相对角度 = 目标方位角 - 我当前的身体朝向
+        relative_angle = target_bearing - self.heading
+        
+        # 将角度规范化到 -180 到 180 度之间
+        relative_angle = (relative_angle + 180) % 360 - 180
+
+        # 返回：偏离轨道的距离(米), 箭头需要旋转的角度
+        return min_dist, relative_angle
+
 class ScreenManager:
     def __init__(self):
         pygame.init()
@@ -568,6 +723,29 @@ class ScreenManager:
 
     def run(self):
         running = True
+        # 实例化你自己的硬件类！
+        # GPS
+        
+        print("正在初始化 ATGM336H GPS 硬件...")
+        try:
+            self.gps = GPSModule(port='/dev/ttyS0', baudrate=9600)
+            self.has_gps = True
+        except Exception as e:
+            print(f"GPS 加载失败: {e}")
+            self.has_gps = False
+        self.lat, self.lon = 30.259885, 120.157252
+        self.alt, self.sats = 0, 0
+        self.gps_status = "No Fix"
+        # compass带有丝滑滤波功能
+        print("正在初始化 LSM303D 指南针硬件...")
+        try:
+            self.compass = Compass(i2c_address=0x1E, filter_size=5)
+            self.has_compass = True
+        except Exception as e:
+            print(f"指南针加载失败，将使用模拟数据。原因: {e}")
+            self.has_compass = False
+            self.sim_heading = 0
+        
         while running:
             current_screen = self.screens[self.current_screen_name]
             # 1. 处理事件
@@ -585,8 +763,40 @@ class ScreenManager:
                         current_screen.handle_event(event)
 
             # 2. 更新逻辑 (读取传感器等)
+            # 读取 GPS
+            if self.has_gps:
+                gps_data = self.gps.get_location()
+                if gps_data:
+                    # 判断是“搜星中”还是“已定位”
+                    if "status" in gps_data:
+                        self.gps_status = gps_data["status"]
+                    else:
+                        self.gps_status = "3D Fix"
+                        self.lat = gps_data["lat"]  # 纬度
+                        self.lon = gps_data["lon"]  # 经度
+                        self.alt = gps_data["alt"]  # 海拔
+                        self.sats = gps_data["sats"]# 可用卫星
+            # ==========================================
+            # ⭐️ 读取真实硬件的平滑数据
+            # ==========================================
+            # 读取指南针
+            if self.has_compass:
+                # 直接调用你代码里的 get_heading() 方法
+                self.heading = self.compass.get_heading()
+            else:
+                # 硬件没接好时的备用假数据
+                sim_heading = (sim_heading + 1) % 360
+                self.heading = sim_heading
+            current_sensor_data = {
+                'heading': self.heading,
+                'lat': self.lat, 
+                'lon': self.lon, 
+                'alt': self.alt,
+                'sats': self.sats,
+                'gps_status': self.gps_status
+            }
+            current_screen.feed_data(**current_sensor_data)
             current_screen.update()
-
             # 3. 绘制画面
             self.screen.fill((0, 0, 0)) # 清屏
             

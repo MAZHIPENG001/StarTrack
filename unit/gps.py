@@ -73,7 +73,7 @@ if __name__ == "__main__":
                     print(f"  海拔: {data['alt']} 米")
                     print(f"  可用卫星: {data['sats']} 颗\n")
             
-            time.sleep(0.2) # 高频读取避免串口缓冲区堆积
+            time.sleep(0.1) # 高频读取避免串口缓冲区堆积
             
     except KeyboardInterrupt:
         print("\nGPS 测试结束。")

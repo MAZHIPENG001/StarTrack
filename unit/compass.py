@@ -2,10 +2,10 @@ import math
 from lsm303d import LSM303D
 
 class Compass:
-    def __init__(self, i2c_address=0x1D, filter_size=5):
+    def __init__(self, i2c_address=0x1E, filter_size=5):
         """
         初始化指南针模块
-        :param i2c_address: 传感器的 I2C 地址，通常是 0x1D 或 0x1E
+        :param i2c_address: 传感器的 I2C 地址，通常是 0x1D(SA0---3.3v) 或 0x1E(*SA0---GND)
         :param filter_size: 移动平均滤波的采样次数，越大读数越平滑，但响应越慢
         """
         try:
@@ -101,4 +101,5 @@ def main():
         print("\n程序结束。")
 
 if __name__ == "__main__":
+    import time
     main()
