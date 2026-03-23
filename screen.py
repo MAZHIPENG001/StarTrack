@@ -1,20 +1,18 @@
 import pygame
 import time
 import math
-from unit.route import load_gpx_route,MapProjector
+import json
 import os
 import random
 import gpxpy
-from unit.compass import Compass
-from unit.gps import GPSModule
-import json
-import math
+
 from cfg.config_manager import global_config as cfg
 from unit.wifi_locator import WifiLocator
+from unit.joystick import DigitalJoystick
+from unit.compass import Compass
+from unit.gps import GPSModule
+from unit.route import load_gpx_route,MapProjector
 
-# ---------------------------------------------------------
-# 地理数学工具箱
-# ---------------------------------------------------------
 def calc_distance(lat1, lon1, lat2, lon2):
     """使用 Haversine 公式计算地球上两点间的距离（单位：米）"""
     R = 6371000  # 地球半径
