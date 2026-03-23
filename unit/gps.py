@@ -40,10 +40,16 @@ class GPSModule:
                         "lat": latitude,
                         "lon": longitude,
                         "alt": altitude,
-                        "sats": num_sats
+                        "sats": num_sats,
+                        "status":"3D Fix"
                     }
                 else:
-                    return {"status": "搜星中..."}
+                    return {
+                        "lat": None,
+                        "lon": None,
+                        "alt": None,
+                        "sats": 0,
+                        "status": "search star"}
                     
         except pynmea2.ParseError:
             # 串口刚启动时可能会读到半截字符串，忽略即可

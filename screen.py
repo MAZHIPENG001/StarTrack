@@ -10,6 +10,7 @@ from unit.gps import GPSModule
 import json
 import math
 from cfg.config_manager import global_config as cfg
+from unit.wifi_locator import WifiLocator
 
 # ---------------------------------------------------------
 # 地理数学工具箱
@@ -247,8 +248,8 @@ class MapScreen(BaseScreen):
         # 显示风格
         self.map_style = 'dark'
         # 存储当前的传感器数据
-        self.current_lat = None
-        self.current_lon = None
+        self.lat = None
+        self.lon = None
         self.heading = None
         self.compass_status=True
         
@@ -286,7 +287,8 @@ class MapScreen(BaseScreen):
                 '1. Select area',
                 '2. Zoom In ++',
                 '3. Zoom Out --',
-                '<- back'
+                '4. wifi location',
+                '5. <- back'
                 ],
             'select_area':[
                 '1. up',
@@ -351,8 +353,8 @@ class MapScreen(BaseScreen):
 
     def feed_data(self, **sensor_data):
         # 使用 .get() 方法，如果主程序没传这个数据，就默认返回 None 或 0，不会报错
-        self.current_lat = sensor_data.get('lat')
-        self.current_lon = sensor_data.get('lon')
+        self.lat = sensor_data.get('lat')
+        self.lon = sensor_data.get('lon')
         self.heading = sensor_data.get('heading', 0)
         
         # 新增接收 GPS 状态数据
@@ -366,8 +368,8 @@ class MapScreen(BaseScreen):
         surface.blit(self.bg_surface, (0, 0))
         
         # 2. 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
-        if self.current_lat is not None and self.current_lon is not None:
-            px, py = self.projector.to_pixel(self.current_lat, self.current_lon)
+        if self.lat is not None and self.lon is not None:
+            px, py = self.projector.to_pixel(self.lat, self.lon)
             self._navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
 
         if self.compass_status is True:
@@ -418,7 +420,7 @@ class MapScreen(BaseScreen):
     
     def _hud_gps(self,surface):
         # ==========================================
-        # ⭐️ 绘制左上角的 GPS 状态监控面板
+        # ⭐️ 绘制 GPS 状态监控面板
         # ==========================================
         panel_width = 180
         panel_height = 80
@@ -450,9 +452,11 @@ class MapScreen(BaseScreen):
         
         # 3. 状态颜色逻辑
         if self.gps_status == "3D Fix":
-            status_color = (0, 255, 0) # 绿色
+            status_color = self.GREEN# 绿色
+        elif self.gps_status == "WPS Fix":
+            status_color = self.BLUE # 蓝色
         else:
-            status_color = (255, 200, 0) # 黄色
+            status_color = self.YELLOW # 黄色
             
         # 4. 渲染文字
         txt_status = font_bold.render(f"SYS: {self.gps_status}", True, status_color)
@@ -580,7 +584,17 @@ class MapScreen(BaseScreen):
             elif index == 2: 
                 self.zoom_level /= 1.3  # 缩小
                 self._refresh_map_view()
-            elif index == 3: self.change_menu_level('main')
+            # ==========================================
+            # ⭐️ 触发手动 Wi-Fi 定位
+            # ==========================================
+            elif index == 3: # 4. WiFi location
+                if hasattr(self, 'wifi_locate_callback') and self.wifi_locate_callback:
+                    print("\n📡 正在手动触发 Wi-Fi/IP 定位，请稍候...")
+                    # 可以在屏幕上画个提示，或者直接执行（会卡顿几秒钟）
+                    self.wifi_locate_callback()
+                else:
+                    print("❌ Wi-Fi 定位模块未接入！")
+            elif index == 4: self.change_menu_level('main')
 
         elif self.current_menu_level == 'select_area':
             # 注意：如果想让地图往下走，代表视野往上走，所以 offset 是正数
@@ -597,10 +611,10 @@ class MapScreen(BaseScreen):
                 self.pan_x -= self.pan_step
                 self._refresh_map_view()
             elif index == 4: # Back to my location (极致数学之美)
-                if self.current_lat is not None and self.current_lon is not None and self.projector:
+                if self.lat is not None and self.lon is not None and self.projector:
                     # 获取当前所在地的未缩放基准坐标
-                    raw_x = self.projector.margin + ((self.current_lon - self.projector.min_lon) * self.projector.lon_scale_factor) * self.projector.base_scale
-                    raw_y = self.projector.margin + (self.projector.max_lat - self.current_lat) * self.projector.base_scale
+                    raw_x = self.projector.margin + ((self.lon - self.projector.min_lon) * self.projector.lon_scale_factor) * self.projector.base_scale
+                    raw_y = self.projector.margin + (self.projector.max_lat - self.lat) * self.projector.base_scale
                     
                     # 逆向推算偏移量，确保当前位置的最终 X, Y 等于屏幕中心点
                     self.pan_x = -(raw_x - self.projector.center_x) * self.zoom_level
@@ -671,7 +685,7 @@ class MapScreen(BaseScreen):
         # 如果没有路线、没有定位、或者没有指南针，就无法导航
         if not hasattr(self, 'current_route_points') or not self.current_route_points:
             return None, None
-        if self.current_lat is None or self.current_lon is None or self.heading is None:
+        if self.lat is None or self.lon is None or self.heading is None:
             return None, None
 
         min_dist = float('inf')
@@ -680,7 +694,7 @@ class MapScreen(BaseScreen):
         # 1. 遍历轨迹，找到离我当前位置最近的那个点
         # (注：如果路线很长，这里可以优化为只搜索上次位置附近，目前先暴力全搜)
         for i, point in enumerate(self.current_route_points):
-            dist = calc_distance(self.current_lat, self.current_lon, point['lat'], point['lon'])
+            dist = calc_distance(self.lat, self.lon, point['lat'], point['lon'])
             if dist < min_dist:
                 min_dist = dist
                 closest_index = i
@@ -694,7 +708,7 @@ class MapScreen(BaseScreen):
 
         # 3. 计算“目标绝对方位角”
         target_bearing = calc_bearing(
-            self.current_lat, self.current_lon, 
+            self.lat, self.lon, 
             target_point['lat'], target_point['lon']
         )
 
@@ -741,7 +755,13 @@ class ScreenManager:
         self.current_wallpaper_path = cfg.get('wallpaper_path', default_wallpaper)
         if 'desktop' in self.screens:
                 self.screens['desktop'].selected_path = self.current_wallpaper_path
-
+        if 'map' in self.screens:
+            self.screens['map'].wifi_locate_callback = self.manual_wifi_locate
+        # 增加一些变量来记住 WPS 坐标
+        self.wps_lat = None
+        self.wps_lon = None
+        self.wps_status_text = ""
+    
     def run(self):
         running = True
         # 实例化你自己的硬件类！
@@ -754,15 +774,17 @@ class ScreenManager:
             print(f"GPS 加载失败: {e}")
             self.has_gps = False
         self.lat, self.lon = 30.259885, 120.157252
+        self.lat=30.855322 
+        self.lon=120.154895
         self.alt, self.sats = 0, 0
-        self.gps_status = "No Fix"
-        # compass带有丝滑滤波功能
+        self.gps_status = "search star"
+        # compass
         print("正在初始化 LSM303D 指南针硬件...")
         try:
             self.compass = Compass(i2c_address=0x1E, filter_size=5)
             self.has_compass = True
             # ==========================================
-            # ⭐️ 核心桥接：把校准函数的遥控器递给地图界面！
+            # ⭐️ 桥接：把校准函数的遥控器递给地图界面！
             # 假设你的地图界面在 self.screens 里的名字叫 'map'
             # ==========================================
             if 'map' in self.screens:
@@ -771,7 +793,9 @@ class ScreenManager:
             print(f"指南针加载失败，将使用模拟数据。原因: {e}")
             self.has_compass = False
             self.sim_heading = 0
-        
+        # wifi
+        self.wps = WifiLocator()
+
         while running:
             current_screen = self.screens[self.current_screen_name]
             # 1. 处理事件
@@ -794,16 +818,24 @@ class ScreenManager:
                 gps_data = self.gps.get_location()
                 if gps_data:
                     # 判断是“搜星中”还是“已定位”
-                    if "status" in gps_data:
+                    if "status" in gps_data and gps_data["sats"] >= 4:
                         self.gps_status = gps_data["status"]
-                    else:
-                        self.gps_status = "3D Fix"
                         self.lat = gps_data["lat"]  # 纬度
                         self.lon = gps_data["lon"]  # 经度
                         self.alt = gps_data["alt"]  # 海拔
                         self.sats = gps_data["sats"]# 可用卫星
+            # 优先级 1：真实的物理 GPS (如果有信号)
+            if self.has_gps and gps_data and gps_data.get("sats", 0) >= 4:
+                self.lat = gps_data["lat"]
+                self.lon = gps_data["lon"]
+                self.gps_status = "3D Fix"  
+            # 优先级 2：如果 GPS 没信号，但用户刚才手动触发了 WPS 并且成功了
+            elif self.wps_lat is not None and self.wps_lon is not None:
+                self.lat = self.wps_lat
+                self.lon = self.wps_lon
+                self.gps_status = self.wps_status_text
             # ==========================================
-            # ⭐️ 读取真实硬件的平滑数据
+            # ⭐️ 读取指南针
             # ==========================================
             # 读取指南针
             if self.has_compass:
@@ -847,6 +879,27 @@ class ScreenManager:
         font = pygame.font.SysFont("Arial", 20)
         nav_text = font.render(f"1:Desktop | 2:Map | 3:Compass  -- Current: {self.current_screen_name.upper()}", True, (255, 255, 0))
         self.screen.blit(nav_text, (20, self.height - self.nav_height + 20))
+
+    def manual_wifi_locate(self):
+        """用户在菜单中手动点击 WiFi Location 时触发此函数"""
+        loc_data = self.wps.get_location()
+        
+        if loc_data:
+            # 获取成功！把数据存起来
+            self.wps_lat = loc_data['lat']
+            self.wps_lon = loc_data['lon']
+            self.wps_status_text = f"WPS Fix ({int(loc_data['accuracy'])}m)"
+
+            print("\n=======================================================")
+            print(f"📍 IP 辅助定位成功！")
+            print(f"🌐 纬度: {loc_data['lat']}, 经度: {loc_data['lon']}")
+            print(f"🏠 大致区域: {loc_data['address']}")
+            print(f"🎯 误差精度: 约 {loc_data['accuracy']} 米 (城市级定位)")
+            print("=======================================================\n")
+            
+        else:
+            self.wps_status_text = "WPS Failed"
+            print("❌ 定位失败。")
 
 if __name__ == "__main__":
     app = ScreenManager()
