@@ -763,6 +763,11 @@ class ScreenManager:
     def run(self):
         running = True
         # 实例化你自己的硬件类！
+        # --- ⭐️ 挂载物理摇杆驱动 ---
+        try:
+            self.joystick = DigitalJoystick()
+        except Exception as e:
+            print(f"⚠️ 摇杆驱动加载失败 (可能是没接线或在没有 GPIO 的电脑上运行): {e}")
         # GPS
         print("正在初始化 ATGM336H GPS 硬件...")
         try:
