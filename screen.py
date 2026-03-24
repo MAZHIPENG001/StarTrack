@@ -12,6 +12,8 @@ from unit.joystick import DigitalJoystick
 from unit.compass import Compass
 from unit.gps import GPSModule
 from unit.route import load_gpx_route,MapProjector
+from unit.env_sensor import EnvironmentSensor
+from unit.system_buzzer import SystemBuzzer
 
 def calc_distance(lat1, lon1, lat2, lon2):
     """使用 Haversine 公式计算地球上两点间的距离（单位：米）"""
@@ -157,6 +159,10 @@ class DesktopScreen(BaseScreen):
         self.selected_path = self.wallpaper_paths[index]
         # self.selected_path=None
         self._load_wallpaper(self.selected_path)
+        # ==========================================
+        # ⭐️ 按键音 UI 状态变量
+        # ==========================================
+        self.key_sound_enabled = True
 
         # --- 1. 定义多级菜单的字典 ---
         self.menus = {
@@ -164,9 +170,14 @@ class DesktopScreen(BaseScreen):
                 "1. System Info", 
                 "2. Sleep Display", 
                 "3. Power Off OS", 
-                "4. Change Wallpaper"
+                "4. Change Wallpaper",
+                "5. System setting"
             ],
-            'wallpaper_menu': self.wallpaper_menu_items
+            'wallpaper_menu': self.wallpaper_menu_items,
+            "System_setting":[
+                f"1. Key Sound: {'ON' if self.key_sound_enabled else 'OFF'}",
+                "2. <- Back"
+            ]
         }
         self.init_menus(self.menus, start_level='main')
 
@@ -182,6 +193,9 @@ class DesktopScreen(BaseScreen):
             elif index == 3:
                 print("进入切换壁纸页面")
                 self.change_menu_level('wallpaper_menu')
+            elif index == 4:
+                print("进入系统设置页面")
+                self.change_menu_level('System_setting')
 
         elif self.current_menu_level == 'wallpaper_menu':
             # 判断是不是按了最后面的 "<- Back" 键
@@ -192,6 +206,23 @@ class DesktopScreen(BaseScreen):
                 # 用户选择了一张图片
                 self.selected_path = self.wallpaper_paths[index]
                 self._load_wallpaper(self.selected_path)
+
+        # ==========================================
+        # ⭐️ 处理系统设置菜单的逻辑
+        # ==========================================
+        elif self.current_menu_level == 'System_setting':
+            if index == 0:
+                # 切换按键音状态
+                self.key_sound_enabled = not self.key_sound_enabled
+                # 动态修改菜单上的文字 (ON 变 OFF，OFF 变 ON)
+                self.menus['System_setting'][0] = f"1. Key Sound: {'ON' if self.key_sound_enabled else 'OFF'}"
+                
+                # 触发大管家的遥控器，把状态同步给全局系统！
+                if hasattr(self, 'toggle_sound_callback') and self.toggle_sound_callback:
+                    self.toggle_sound_callback(self.key_sound_enabled)
+                    
+            elif index == 1: # 按下了 <- Back
+                self.change_menu_level('main')
     
     def draw(self, surface):
         surface.blit(self.bg_img, (0,0))
@@ -796,7 +827,25 @@ class ScreenManager:
             self.sim_heading = 0
         # wifi
         self.wps = WifiLocator()
-
+        # bme280
+        print("正在初始化 BME280 气象雷达...")
+        try:
+            self.env_sensor = EnvironmentSensor()
+            self.has_env_sensor = True
+        except Exception as e:
+            self.has_env_sensor = False
+        # 天气数据
+        self.sys_temp = "--"
+        self.sys_hum = "--"
+        # buzzer
+        print("正在初始化系统蜂鸣器...")
+        self.buzzer = SystemBuzzer(pin=17)
+        # 偏航警报的冷却时间记录
+        self.last_alarm_time = 0
+        self.os_key_sound_enabled = True
+        # 搭桥：把修改声音的遥控器交给桌面
+        if 'desktop' in self.screens:
+            self.screens['desktop'].toggle_sound_callback = self.set_key_sound
         while running:
             current_screen = self.screens[self.current_screen_name]
             # 1. 处理事件
@@ -804,6 +853,12 @@ class ScreenManager:
                 if event.type == pygame.QUIT:
                     running = False
                 if event.type == pygame.KEYDOWN:
+                    # # ⭐️ 只要有按键按下，立刻发出短促的滴声！
+                    # if hasattr(self, 'buzzer'):
+                    #     self.buzzer.click()
+                    # ⭐️ 只有在全局允许发声时，按键才滴滴响
+                    if hasattr(self, 'buzzer') and self.os_key_sound_enabled:
+                        self.buzzer.click()
                     # 【系统级拦截】：按键 1 (轮回切换界面)
                     if event.key == pygame.K_1:
                         self.current_index = (self.current_index + 1) % len(self.screen_order)
@@ -840,12 +895,22 @@ class ScreenManager:
             # ==========================================
             # ⭐️ 读取指南针
             # ==========================================
-            # 读取指南针
             if self.has_compass:
                 self.heading = self.compass.get_heading()
             else:
                 self.sim_heading = (self.sim_heading + 1) % 360
                 self.heading = self.sim_heading
+            # ==========================================
+            # ⭐️ 读取气象站与气压海拔融合
+            # ==========================================
+            if has_env_sensor:
+                env_data = self.env_sensor.get_data()
+                if env_data:
+                    self.sys_temp = env_data['temp']
+                    self.sys_hum = env_data['humidity']
+                    
+                    # 只要气压计活着，就用气压海拔覆盖 GPS 的海拔！
+                    self.alt = env_data['alt']
             # ==========================================
             # ⭐️ data update
             # ==========================================
@@ -855,10 +920,26 @@ class ScreenManager:
                 'lon': self.lon, 
                 'alt': self.alt,
                 'sats': self.sats,
-                'gps_status': self.gps_status
+                'gps_status': self.gps_status,
+                'temp': self.sys_temp,     # 温度
+                'humidity': self.sys_hum   # 湿度
             }
             current_screen.feed_data(**current_sensor_data)
             current_screen.update()
+            # ==========================================
+            # ⭐️ 偏航警报硬件联动 (Off-Course Alarm)
+            # ==========================================
+            # 只有在地图界面，且有路线时，才进行距离侦测
+            if self.current_screen_name == 'map' and hasattr(current_screen, '_calculate_navigation'):
+                dist, _ = current_screen._calculate_navigation()
+                if dist is not None and dist > 50: # 如果偏航超过 50 米
+                    current_time = time.time()
+                    # 每隔 5 秒钟，触发一次急促的双音警报
+                    if current_time - self.last_alarm_time > 5.0:
+                        print(f"⚠️ 严重偏航 {int(dist)}m！触发蜂鸣器警报！")
+                        if hasattr(self, 'buzzer'):
+                            self.buzzer.warning_alarm()
+                        self.last_alarm_time = current_time
             # 3. 绘制画面
             self.screen.fill((0, 0, 0)) # 清屏
             
@@ -905,6 +986,10 @@ class ScreenManager:
             self.wps_status_text = "WPS Failed"
             print("❌ 定位失败。")
 
+    def set_key_sound(self, is_enabled):
+        """接收来自 UI 界面的按键音开启/关闭指令"""
+        self.os_key_sound_enabled = is_enabled
+        print(f"⚙️ 系统设置: 全局按键音已 {'开启' if is_enabled else '静音'}")
 if __name__ == "__main__":
     app = ScreenManager()
     app.run()
