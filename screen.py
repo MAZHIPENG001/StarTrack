@@ -170,40 +170,6 @@ class DesktopScreen(BaseScreen):
         }
         self.init_menus(self.menus, start_level='main')
 
-    def load_image(self):
-        self.wallpaper_paths = []  # 初始化为实例变量
-        self.wallpaper_menu_items = []  # 初始化为实例变量
-        # 扫描壁纸目录 (如果目录存在的话)
-        if os.path.exists(self.image_dir):
-            # 遍历文件夹中的文件，并按字母排序
-            for file_name in sorted(os.listdir(self.image_dir)):
-                # 只筛选常见的图片格式
-                if file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-                    # 保存绝对路径
-                    self.wallpaper_paths.append(os.path.join(self.image_dir, file_name))
-                    # 在菜单显示时，加上箭头，并截断过长的文件名防止越界
-                    display_name = file_name[:20] + "..." if len(file_name) > 20 else file_name
-                    self.wallpaper_menu_items.append(f"  -> {display_name}")
-        else:
-            print(f"⚠️ 警告: 找不到壁纸文件夹 {self.image_dir}")
-            self.wallpaper_menu_items.append("  (No Images Found)")
-        # 无论有没有图片，最后都必须加上返回键！
-        self.wallpaper_menu_items.append("  <- Back")
-
-    def draw(self, surface):
-        surface.blit(self.bg_img, (0,0))
-        
-        # 绘制时间
-        current_time = time.strftime("%H:%M:%S")
-        current_date = time.strftime("%Y-%m-%d  %A")
-        
-        time_text = self.font_time.render(current_time, True, (255, 255, 255))
-        date_text = self.font_date.render(current_date, True, (200, 200, 200))
-        
-        surface.blit(time_text, (self.width//2 - time_text.get_width()//2, self.height//3))
-        surface.blit(date_text, (self.width//2 - date_text.get_width()//2, self.height//3 + 100))
-        self.draw_menu(surface, 50, 50)
-
     def on_confirm(self, index):
         # 2. 根据选中的是第几个，执行对应的操作
         if self.current_menu_level == 'main':
@@ -226,6 +192,40 @@ class DesktopScreen(BaseScreen):
                 # 用户选择了一张图片
                 self.selected_path = self.wallpaper_paths[index]
                 self._load_wallpaper(self.selected_path)
+    
+    def draw(self, surface):
+        surface.blit(self.bg_img, (0,0))
+        
+        # 绘制时间
+        current_time = time.strftime("%H:%M:%S")
+        current_date = time.strftime("%Y-%m-%d  %A")
+        
+        time_text = self.font_time.render(current_time, True, (255, 255, 255))
+        date_text = self.font_date.render(current_date, True, (200, 200, 200))
+        
+        surface.blit(time_text, (self.width//2 - time_text.get_width()//2, self.height//3))
+        surface.blit(date_text, (self.width//2 - date_text.get_width()//2, self.height//3 + 100))
+        self.draw_menu(surface, 50, 50)
+
+    def load_image(self):
+        self.wallpaper_paths = []  # 初始化为实例变量
+        self.wallpaper_menu_items = []  # 初始化为实例变量
+        # 扫描壁纸目录 (如果目录存在的话)
+        if os.path.exists(self.image_dir):
+            # 遍历文件夹中的文件，并按字母排序
+            for file_name in sorted(os.listdir(self.image_dir)):
+                # 只筛选常见的图片格式
+                if file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                    # 保存绝对路径
+                    self.wallpaper_paths.append(os.path.join(self.image_dir, file_name))
+                    # 在菜单显示时，加上箭头，并截断过长的文件名防止越界
+                    display_name = file_name[:20] + "..." if len(file_name) > 20 else file_name
+                    self.wallpaper_menu_items.append(f"  -> {display_name}")
+        else:
+            print(f"⚠️ 警告: 找不到壁纸文件夹 {self.image_dir}")
+            self.wallpaper_menu_items.append("  (No Images Found)")
+        # 无论有没有图片，最后都必须加上返回键！
+        self.wallpaper_menu_items.append("  <- Back")
 
     def _load_wallpaper(self, path):
         """内部方法：加载并缩放图片"""
@@ -269,9 +269,8 @@ class MapScreen(BaseScreen):
         self.route_pixels = []
         # --- 1. 扫描地图文件夹 ---
         self.map_dir = './map'
-        # self.gpx_paths,route_menu_items=self.load_map(self.map_dir)
         self.load_map()
-        # --- 2. 注入多级菜单 ---
+        # --- 2. 多级菜单 ---
         my_menus = {
             'main': [
                 "1. Select Route", 
@@ -312,6 +311,126 @@ class MapScreen(BaseScreen):
             self.route_pixels = [self.projector.to_pixel(p['lat'], p['lon']) for p in dummy_points]
             self._draw_static_background()
     
+    def on_confirm(self, index):
+        """处理地图界面的菜单确认动作"""
+        if self.current_menu_level == 'main':
+            if index == 0:
+                self.change_menu_level('route_menu') # 跳入选择路线子菜单
+            elif index == 1:
+                self.map_style = 'light' if self.map_style == 'dark' else 'dark'
+                self._draw_static_background()
+            elif index == 2:
+                print("缩放功能")
+                self.change_menu_level('zoom') # 跳入地图缩放菜单
+            elif index == 3:
+                print("change compass statues")
+                self.compass_status=not self.compass_status
+                self.menus['main'][len(self.menus['main'])-1] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
+            elif index == 4: # 5. Compass calibrate
+                if hasattr(self, 'calibrate_callback') and self.calibrate_callback:
+                    print("\n⚠️ 即将冻结屏幕进行校准，请看终端提示！")
+                    # 可以在这加个变量，在屏幕上画个“校准中”的提示
+                    
+                    # 真正执行硬件校准 (这会让屏幕暂停刷新 30 秒)
+                    self.calibrate_callback(duration=30) 
+                    
+                    print("✅ 校准完毕，系统恢复运行！")
+                else:
+                    print("❌ 未检测到真实的指南针硬件，无法校准！")
+
+        elif self.current_menu_level == 'zoom':
+            if index == 0: self.change_menu_level('select_area') # 跳入平移菜单
+            elif index == 1: 
+                self.zoom_level *= 1.3  # 放大 1.3 倍
+                self._refresh_map_view()
+            elif index == 2: 
+                self.zoom_level /= 1.3  # 缩小
+                self._refresh_map_view()
+            # ==========================================
+            # ⭐️ 触发手动 Wi-Fi 定位
+            # ==========================================
+            elif index == 3: # 4. WiFi location
+                if hasattr(self, 'wifi_locate_callback') and self.wifi_locate_callback:
+                    print("\n📡 正在手动触发 Wi-Fi/IP 定位，请稍候...")
+                    # 可以在屏幕上画个提示，或者直接执行（会卡顿几秒钟）
+                    self.wifi_locate_callback()
+                else:
+                    print("❌ Wi-Fi 定位模块未接入！")
+            elif index == 4: self.change_menu_level('main')
+
+        elif self.current_menu_level == 'select_area':
+            # 注意：如果想让地图往下走，代表视野往上走，所以 offset 是正数
+            if index == 0:   # Up (视野向上，地图向下)
+                self.pan_y += self.pan_step
+                self._refresh_map_view()
+            elif index == 1: # Down
+                self.pan_y -= self.pan_step
+                self._refresh_map_view()
+            elif index == 2: # Left
+                self.pan_x += self.pan_step
+                self._refresh_map_view()
+            elif index == 3: # Right
+                self.pan_x -= self.pan_step
+                self._refresh_map_view()
+            elif index == 4: # Back to my location (极致数学之美)
+                if self.lat is not None and self.lon is not None and self.projector:
+                    # 获取当前所在地的未缩放基准坐标
+                    raw_x = self.projector.margin + ((self.lon - self.projector.min_lon) * self.projector.lon_scale_factor) * self.projector.base_scale
+                    raw_y = self.projector.margin + (self.projector.max_lat - self.lat) * self.projector.base_scale
+                    
+                    # 逆向推算偏移量，确保当前位置的最终 X, Y 等于屏幕中心点
+                    self.pan_x = -(raw_x - self.projector.center_x) * self.zoom_level
+                    self.pan_y = -(raw_y - self.projector.center_y) * self.zoom_level
+                    self._refresh_map_view()
+                    print("已重新居中到当前 GPS 定位！")
+                else:
+                    print("⚠️ 尚未获取到有效的 GPS 坐标，无法居中。")
+            elif index == 5:
+                self.pan_x = 0
+                self.pan_y = 0
+                self.zoom_level = 1
+                self._refresh_map_view()
+            elif index == 6: 
+                self.change_menu_level('zoom')
+
+        elif self.current_menu_level == 'route_menu':
+            # 判断是不是按了返回键
+            if index == len(self.gpx_paths) or not self.gpx_paths:
+                self.change_menu_level('main')
+            else:
+                # 加载选中的路书
+                selected_gpx = self.gpx_paths[index]
+                self._load_gpx_and_project(selected_gpx)
+                # 加载完成后，自动退回主菜单，保持界面清爽
+                self.change_menu_level('main')
+
+    def draw(self, surface):
+        """将画面画到 OS 传来的画布上"""
+        # 1. 静态路线图
+        surface.blit(self.bg_surface, (0, 0))
+        
+        # 2. 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
+        if self.lat is not None and self.lon is not None:
+            px, py = self.projector.to_pixel(self.lat, self.lon)
+            self._navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
+
+        if self.compass_status is True:
+            self._hud_compass(surface, self.compass_cx, self.compass_cy, self.compass_radius, self.heading)
+        self._hud_gps(surface)
+        self.draw_menu(surface, 50, 50)
+        self._hud_pointer(surface)
+
+    def feed_data(self, **sensor_data):
+        # 使用 .get() 方法，如果主程序没传这个数据，就默认返回 None 或 0，不会报错
+        self.lat = sensor_data.get('lat')
+        self.lon = sensor_data.get('lon')
+        self.heading = sensor_data.get('heading', 0)
+        
+        # 新增接收 GPS 状态数据
+        self.alt = sensor_data.get('alt', 0)
+        self.sats = sensor_data.get('sats', 0)
+        self.gps_status = sensor_data.get('gps_status', 'Unknown')
+    
     def load_map(self):
         self.gpx_paths=[]
         self.route_menu_items=[]
@@ -348,33 +467,6 @@ class MapScreen(BaseScreen):
             pygame.draw.lines(self.bg_surface, self.GREEN, False, self.route_pixels, 4)
             pygame.draw.circle(self.bg_surface, self.LIGHT_GREEN, self.route_pixels[0], 6)
             pygame.draw.circle(self.bg_surface, self.LIGHT_RED, self.route_pixels[-1], 6)
-
-    def feed_data(self, **sensor_data):
-        # 使用 .get() 方法，如果主程序没传这个数据，就默认返回 None 或 0，不会报错
-        self.lat = sensor_data.get('lat')
-        self.lon = sensor_data.get('lon')
-        self.heading = sensor_data.get('heading', 0)
-        
-        # 新增接收 GPS 状态数据
-        self.alt = sensor_data.get('alt', 0)
-        self.sats = sensor_data.get('sats', 0)
-        self.gps_status = sensor_data.get('gps_status', 'Unknown')
-    
-    def draw(self, surface):
-        """将画面画到 OS 传来的画布上"""
-        # 1. 贴上静态路线图
-        surface.blit(self.bg_surface, (0, 0))
-        
-        # 2. 如果有当前的 GPS 坐标，画出代表你自己的导航箭头
-        if self.lat is not None and self.lon is not None:
-            px, py = self.projector.to_pixel(self.lat, self.lon)
-            self._navigation_arrow(surface, self.PINK, (px, py), 15, self.heading)
-
-        if self.compass_status is True:
-            self._hud_compass(surface, self.compass_cx, self.compass_cy, self.compass_radius, self.heading)
-        self._hud_gps(surface)
-        self.draw_menu(surface, 50, 50)
-        self._hud_pointer(surface)
     
     def _hud_pointer(self,surface):
         # ==========================================
@@ -547,99 +639,6 @@ class MapScreen(BaseScreen):
             # 重新绘制静态背景
             self._draw_static_background()
 
-    def on_confirm(self, index):
-        """处理地图界面的菜单确认动作"""
-        if self.current_menu_level == 'main':
-            if index == 0:
-                self.change_menu_level('route_menu') # 跳入选择路线子菜单
-            elif index == 1:
-                self.map_style = 'light' if self.map_style == 'dark' else 'dark'
-                self._draw_static_background()
-            elif index == 2:
-                print("缩放功能")
-                self.change_menu_level('zoom') # 跳入地图缩放菜单
-            elif index == 3:
-                print("change compass statues")
-                self.compass_status=not self.compass_status
-                self.menus['main'][len(self.menus['main'])-1] = f"5. Compass: {"ON" if self.compass_status else "OFF"}"
-            elif index == 4: # 5. Compass calibrate
-                if hasattr(self, 'calibrate_callback') and self.calibrate_callback:
-                    print("\n⚠️ 即将冻结屏幕进行校准，请看终端提示！")
-                    # 可以在这加个变量，在屏幕上画个“校准中”的提示
-                    
-                    # 真正执行硬件校准 (这会让屏幕暂停刷新 30 秒)
-                    self.calibrate_callback(duration=30) 
-                    
-                    print("✅ 校准完毕，系统恢复运行！")
-                else:
-                    print("❌ 未检测到真实的指南针硬件，无法校准！")
-
-        elif self.current_menu_level == 'zoom':
-            if index == 0: self.change_menu_level('select_area') # 跳入平移菜单
-            elif index == 1: 
-                self.zoom_level *= 1.3  # 放大 1.3 倍
-                self._refresh_map_view()
-            elif index == 2: 
-                self.zoom_level /= 1.3  # 缩小
-                self._refresh_map_view()
-            # ==========================================
-            # ⭐️ 触发手动 Wi-Fi 定位
-            # ==========================================
-            elif index == 3: # 4. WiFi location
-                if hasattr(self, 'wifi_locate_callback') and self.wifi_locate_callback:
-                    print("\n📡 正在手动触发 Wi-Fi/IP 定位，请稍候...")
-                    # 可以在屏幕上画个提示，或者直接执行（会卡顿几秒钟）
-                    self.wifi_locate_callback()
-                else:
-                    print("❌ Wi-Fi 定位模块未接入！")
-            elif index == 4: self.change_menu_level('main')
-
-        elif self.current_menu_level == 'select_area':
-            # 注意：如果想让地图往下走，代表视野往上走，所以 offset 是正数
-            if index == 0:   # Up (视野向上，地图向下)
-                self.pan_y += self.pan_step
-                self._refresh_map_view()
-            elif index == 1: # Down
-                self.pan_y -= self.pan_step
-                self._refresh_map_view()
-            elif index == 2: # Left
-                self.pan_x += self.pan_step
-                self._refresh_map_view()
-            elif index == 3: # Right
-                self.pan_x -= self.pan_step
-                self._refresh_map_view()
-            elif index == 4: # Back to my location (极致数学之美)
-                if self.lat is not None and self.lon is not None and self.projector:
-                    # 获取当前所在地的未缩放基准坐标
-                    raw_x = self.projector.margin + ((self.lon - self.projector.min_lon) * self.projector.lon_scale_factor) * self.projector.base_scale
-                    raw_y = self.projector.margin + (self.projector.max_lat - self.lat) * self.projector.base_scale
-                    
-                    # 逆向推算偏移量，确保当前位置的最终 X, Y 等于屏幕中心点
-                    self.pan_x = -(raw_x - self.projector.center_x) * self.zoom_level
-                    self.pan_y = -(raw_y - self.projector.center_y) * self.zoom_level
-                    self._refresh_map_view()
-                    print("已重新居中到当前 GPS 定位！")
-                else:
-                    print("⚠️ 尚未获取到有效的 GPS 坐标，无法居中。")
-            elif index == 5:
-                self.pan_x = 0
-                self.pan_y = 0
-                self.zoom_level = 1
-                self._refresh_map_view()
-            elif index == 6: 
-                self.change_menu_level('zoom')
-
-        elif self.current_menu_level == 'route_menu':
-            # 判断是不是按了返回键
-            if index == len(self.gpx_paths) or not self.gpx_paths:
-                self.change_menu_level('main')
-            else:
-                # 加载选中的路书
-                selected_gpx = self.gpx_paths[index]
-                self._load_gpx_and_project(selected_gpx)
-                # 加载完成后，自动退回主菜单，保持界面清爽
-                self.change_menu_level('main')
-
     def _load_gpx_and_project(self, filepath):
         """核心业务逻辑：读取 GPX -> 提取坐标 -> 重新实例化投影器 -> 重绘画布"""
         try:
@@ -755,20 +754,20 @@ class ScreenManager:
                 self.screens['desktop'].selected_path = self.current_wallpaper_path
         if 'map' in self.screens:
             self.screens['map'].wifi_locate_callback = self.manual_wifi_locate
-        # 增加一些变量来记住 WPS 坐标
+        # WPS 坐标
         self.wps_lat = None
         self.wps_lon = None
         self.wps_status_text = ""
     
     def run(self):
         running = True
-        # 实例化你自己的硬件类！
-        # --- ⭐️ 挂载物理摇杆驱动 ---
+        # 实例化硬件！
+        # --- ⭐️ 摇杆 ---
         try:
             self.joystick = DigitalJoystick()
         except Exception as e:
             print(f"⚠️ 摇杆驱动加载失败 (可能是没接线或在没有 GPIO 的电脑上运行): {e}")
-        # GPS
+        # --- ⭐️ GPS ---
         print("正在初始化 ATGM336H GPS 硬件...")
         try:
             self.gps = GPSModule(port='/dev/ttyS0', baudrate=9600)
@@ -776,7 +775,7 @@ class ScreenManager:
         except Exception as e:
             print(f"GPS 加载失败: {e}")
             self.has_gps = False
-        self.lat, self.lon = 30.259885, 120.157252
+            gps_data = None
         self.lat=30.855322 
         self.lon=120.154895
         self.alt, self.sats = 0, 0
@@ -787,8 +786,7 @@ class ScreenManager:
             self.compass = Compass(i2c_address=0x1E, filter_size=5)
             self.has_compass = True
             # ==========================================
-            # ⭐️ 桥接：把校准函数的遥控器递给地图界面！
-            # 假设你的地图界面在 self.screens 里的名字叫 'map'
+            # ⭐️ 桥接：把校准函数-->地图界面
             # ==========================================
             if 'map' in self.screens:
                 self.screens['map'].calibrate_callback = self.compass.calibrate
@@ -815,8 +813,10 @@ class ScreenManager:
                     else:
                         current_screen.handle_event(event)
 
-            # 2. 更新逻辑 (读取传感器等)
-            # 读取 GPS
+            # 2. 更新逻辑
+            # ==========================================
+            # ⭐️ 读取GPS
+            # ==========================================
             if self.has_gps:
                 gps_data = self.gps.get_location()
                 if gps_data:
@@ -827,12 +827,12 @@ class ScreenManager:
                         self.lon = gps_data["lon"]  # 经度
                         self.alt = gps_data["alt"]  # 海拔
                         self.sats = gps_data["sats"]# 可用卫星
-            # 优先级 1：真实的物理 GPS (如果有信号)
+            # 优先级 1：GPS (如果有信号)
             if self.has_gps and gps_data and gps_data.get("sats", 0) >= 4:
                 self.lat = gps_data["lat"]
                 self.lon = gps_data["lon"]
                 self.gps_status = "3D Fix"  
-            # 优先级 2：如果 GPS 没信号，但用户刚才手动触发了 WPS 并且成功了
+            # 优先级 2：GPS 没信号，但用户刚才手动触发了 WPS 并且成功了
             elif self.wps_lat is not None and self.wps_lon is not None:
                 self.lat = self.wps_lat
                 self.lon = self.wps_lon
@@ -842,12 +842,13 @@ class ScreenManager:
             # ==========================================
             # 读取指南针
             if self.has_compass:
-                # 直接调用你代码里的 get_heading() 方法
                 self.heading = self.compass.get_heading()
             else:
-                # 硬件没接好时的备用假数据
-                sim_heading = (sim_heading + 1) % 360
-                self.heading = sim_heading
+                self.sim_heading = (self.sim_heading + 1) % 360
+                self.heading = self.sim_heading
+            # ==========================================
+            # ⭐️ data update
+            # ==========================================
             current_sensor_data = {
                 'heading': self.heading,
                 'lat': self.lat, 
